@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>OPIc 연습실</title>
-  <link rel="stylesheet" href="style.css?v=6" />
+  <link rel="stylesheet" href="style.css?v=7" />
 </head>
 <body>
   <header class="topbar">
@@ -139,24 +139,17 @@
         <div class="transcript" id="transcript" contenteditable="true" data-placeholder="녹음을 시작하면 말한 내용이 여기 표시됩니다. 직접 수정할 수도 있어요."></div>
       </div>
 
-      <audio id="playback" controls class="hidden"></audio>
-
       <div class="q-bottom-actions">
-        <button class="btn primary" id="btn-feedback">🤖 AI 피드백 받기</button>
-        <button class="btn" id="btn-next-q">다음 문항 →</button>
+        <button class="btn primary" id="btn-next-q">다음 문항 →</button>
         <button class="btn ghost" id="btn-finish">종료</button>
       </div>
-
-      <div class="feedback-box hidden" id="feedback-box">
-        <div class="feedback-label">🤖 AI 피드백</div>
-        <div class="feedback-content" id="feedback-content"></div>
-      </div>
+      <p class="hint">답변에만 집중하세요! 다시듣기와 AI 피드백은 끝난 뒤 🎧 녹음 기록에서 할 수 있어요.</p>
     </section>
 
     <!-- 모의고사 결과 화면 -->
     <section id="view-mock-result" class="view hidden">
       <h2 id="result-title">📊 모의고사 완료!</h2>
-      <p class="intro">각 문항의 녹음과 답변을 확인하고 AI 피드백을 받아보세요.<br>이 세션의 녹음과 답변은 🎧 <b>녹음 기록</b>에 저장되어 언제든 다시 들을 수 있어요.</p>
+      <p class="intro">각 문항의 답변을 확인하고 AI 피드백을 받아보세요. 피드백은 자동 저장됩니다.<br>녹음 다시듣기는 🎧 <b>녹음 기록</b>에서 할 수 있어요.</p>
       <button class="btn primary" id="btn-overall-grade">🏆 종합 등급 예측 받기</button>
       <div class="feedback-box hidden" id="overall-grade-box" style="margin-bottom:18px">
         <div class="feedback-label">🏆 종합 평가</div>
@@ -183,6 +176,11 @@
     <!-- 녹음 기록 -->
     <section id="view-history" class="view hidden">
       <h2>🎧 녹음 기록</h2>
+      <div class="h-filter">
+        <button class="btn active" data-hfilter="all">전체</button>
+        <button class="btn" data-hfilter="mock">📝 모의고사</button>
+        <button class="btn" data-hfilter="practice">🎯 주제 연습</button>
+      </div>
       <div id="history-list"></div>
     </section>
 
@@ -213,7 +211,7 @@
 
   <div class="toast hidden" id="toast"></div>
 
-  <script src="questions.js?v=6"></script>
-  <script src="app.js?v=6"></script>
+  <script src="questions.js?v=7"></script>
+  <script src="app.js?v=7"></script>
 </body>
 </html>

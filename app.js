@@ -88,7 +88,21 @@ async function saveRecording(entry) {
     delete e.audio;
   }
   const tx = db.transaction('recordings', 'readwrite');
-  tx.objectStore('recordings').add(e);
+  const req = tx.objectStore('recordings').add(e);
+  return new Promise((resolve) => {
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => resolve(null);
+  });
+}
+
+// 저장된 기록에 필드 추가/수정 (피드백 저장용)
+function updateRecording(id, patch) {
+  if (!db || id == null) return;
+  const store = db.transaction('recordings', 'readwrite').objectStore('recordings');
+  const req = store.get(id);
+  req.onsuccess = () => {
+    if (req.result) store.put({ ...req.result, ...patch });
+  };
 }
 
 function recordingBlob(r) {
@@ -179,7 +193,6 @@ async function startRecording() {
   state.audioBlob = null;
   state.finalTranscript = '';
   $('transcript').textContent = '';
-  $('playback').classList.add('hidden');
 
   // 음성 인식을 먼저 시작 (일부 안드로이드에서 녹음이 먼저면 인식이 마이크를 못 잡음)
   state.recognition = createRecognition();
@@ -201,10 +214,6 @@ async function startRecording() {
     state.stopPromise = new Promise((r) => { resolveStop = r; });
     mr.onstop = () => {
       state.audioBlob = new Blob(state.audioChunks, { type: mr.mimeType || 'audio/webm' });
-      const url = URL.createObjectURL(state.audioBlob);
-      const player = $('playback');
-      player.src = url;
-      player.classList.remove('hidden');
       stream.getTracks().forEach((t) => t.stop());
       resolveStop();
     };
@@ -288,9 +297,6 @@ function renderQuestion() {
   state.recDuration = 0;
   $('rec-time').textContent = '0:00';
   $('rec-label').textContent = settings.sttMode === 'stt-only' ? '받아쓰기 시작' : '녹음 시작';
-  $('playback').classList.add('hidden');
-  $('feedback-box').classList.add('hidden');
-  $('feedback-content').innerHTML = '';
   $('btn-next-q').textContent = state.qIndex + 1 >= state.queue.length
     ? (state.mode === 'mock' ? '시험 종료 →' : '완료')
     : '다음 문항 →';
@@ -331,7 +337,7 @@ function currentTranscript() {
   return $('transcript').textContent.trim();
 }
 
-function archiveCurrentAnswer() {
+async function archiveCurrentAnswer() {
   const q = state.queue[state.qIndex];
   const transcript = currentTranscript();
   if (state.audioBlob || transcript) {
@@ -347,16 +353,16 @@ function archiveCurrentAnswer() {
       audio: state.audioBlob,
       duration: state.recDuration,
     };
-    saveRecording(entry);
-    state.mockResults.push({ ...q, transcript, audioBlob: state.audioBlob, duration: state.recDuration });
+    const recId = await saveRecording(entry);
+    state.mockResults.push({ ...q, transcript, duration: state.recDuration, recId });
   } else {
-    state.mockResults.push({ ...q, transcript: '', audioBlob: null, duration: 0 });
+    state.mockResults.push({ ...q, transcript: '', duration: 0, recId: null });
   }
 }
 
 async function nextQuestion() {
   await stopAndWait();
-  archiveCurrentAnswer();
+  await archiveCurrentAnswer();
   state.audioBlob = null;
   state.recDuration = 0;
   state.stopPromise = null;
@@ -410,12 +416,6 @@ function showSessionResult() {
       <div class="r-q">${escapeHtml(r.text)}</div>
       <div class="r-answer">${r.transcript ? escapeHtml(r.transcript) : '(답변 없음)'}</div>
     `;
-    if (r.audioBlob) {
-      const audio = document.createElement('audio');
-      audio.controls = true;
-      audio.src = URL.createObjectURL(r.audioBlob);
-      div.appendChild(audio);
-    }
     if (r.transcript) {
       const btn = document.createElement('button');
       btn.className = 'btn primary';
@@ -424,7 +424,8 @@ function showSessionResult() {
       const fb = document.createElement('div');
       fb.className = 'feedback-content';
       fb.style.marginTop = '10px';
-      btn.onclick = () => requestFeedback(r.text, r.transcript, fb, btn, r.duration);
+      btn.onclick = () => requestFeedback(r.text, r.transcript, fb, btn, r.duration,
+        (fullText) => { if (fullText) updateRecording(r.recId, { feedback: fullText }); });
       div.appendChild(btn);
       div.appendChild(fb);
     }
@@ -605,12 +606,15 @@ async function callClaude(system, userText, targetEl, onDone) {
   }
 }
 
-function requestFeedback(question, answer, targetEl, btn, durationSec) {
+function requestFeedback(question, answer, targetEl, btn, durationSec, onDone) {
   if (btn) btn.disabled = true;
   const stats = speechStats(answer, durationSec);
   const user = `[OPIc Question]\n${question}\n\n[Student's spoken answer (transcribed)]\n${answer}`
     + (stats ? `\n\n[Speech stats]\n${stats}` : '');
-  callClaude(FEEDBACK_SYSTEM, user, targetEl, () => { if (btn) btn.disabled = false; });
+  callClaude(FEEDBACK_SYSTEM, user, targetEl, (fullText) => {
+    if (btn) btn.disabled = false;
+    if (onDone) onDone(fullText);
+  });
 }
 
 // 간단 마크다운 렌더러
@@ -660,12 +664,13 @@ function renderTopicGrids() {
 }
 
 // ===== 녹음 기록 =====
-async function renderHistory() {
+async function renderHistory(filter = 'all') {
   const list = $('history-list');
   list.innerHTML = '';
-  const recs = await getRecordings();
+  let recs = await getRecordings();
+  if (filter !== 'all') recs = recs.filter((r) => r.mode === filter);
   if (recs.length === 0) {
-    list.innerHTML = '<div class="empty-msg">아직 녹음 기록이 없습니다.<br>연습을 시작해보세요!</div>';
+    list.innerHTML = '<div class="empty-msg">기록이 없습니다.<br>연습을 시작해보세요!</div>';
     return;
   }
   // 세션(모의고사/연습 1회)별로 묶기
@@ -676,17 +681,39 @@ async function renderHistory() {
     if (last && last.key === key) last.items.push(r);
     else groups.push({ key, items: [r] });
   }
+  const DAY_NAMES = ['일', '월', '화', '수', '목', '금', '토'];
+  let lastDay = null;
   groups.forEach((g) => {
     const first = g.items[0];
     const date = new Date(first.date);
-    const dateStr = `${date.getMonth() + 1}/${date.getDate()} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+
+    // 날짜별 구분 헤더
+    const dayKey = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+    if (dayKey !== lastDay) {
+      lastDay = dayKey;
+      const dayEl = document.createElement('div');
+      dayEl.className = 'day-label';
+      dayEl.textContent = `📅 ${date.getFullYear()}년 ${date.getMonth() + 1}월 ${date.getDate()}일 (${DAY_NAMES[date.getDay()]})`;
+      list.appendChild(dayEl);
+    }
+
+    const timeStr = `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
     const modeLabel = first.mode === 'mock'
       ? `📝 모의고사${first.difficulty ? ` (${first.difficulty}단계)` : ''}`
       : '🎯 주제 연습';
     const header = document.createElement('h3');
     header.className = 'group-label';
-    header.textContent = `${modeLabel} · ${dateStr} · ${g.items.length}문항`;
+    header.textContent = `${modeLabel} · ${timeStr} · ${g.items.length}문항`;
     list.appendChild(header);
+
+    // 저장된 종합 평가 표시
+    const withSession = g.items.find((r) => r.sessionFeedback);
+    if (withSession) {
+      const box = document.createElement('div');
+      box.className = 'history-item';
+      box.innerHTML = `<div class="h-meta">🏆 종합 평가</div><div class="feedback-content">${renderMarkdown(withSession.sessionFeedback)}</div>`;
+      list.appendChild(box);
+    }
 
     // 세션 안에서는 문항 순서대로
     [...g.items].sort((a, b) => (a.number || 0) - (b.number || 0)).forEach((r) => {
@@ -704,24 +731,30 @@ async function renderHistory() {
         audio.src = URL.createObjectURL(blob);
         div.appendChild(audio);
       }
+      // 저장된 피드백이 있으면 표시
+      const fb = document.createElement('div');
+      fb.className = 'feedback-content saved-feedback';
+      if (r.feedback) fb.innerHTML = renderMarkdown(r.feedback);
+      else fb.classList.add('hidden');
       const actions = document.createElement('div');
       actions.className = 'h-actions';
       if (r.transcript) {
         const fbBtn = document.createElement('button');
         fbBtn.className = 'btn primary';
-        fbBtn.textContent = '🤖 AI 피드백';
-        const fb = document.createElement('div');
-        fb.className = 'feedback-content';
-        fb.style.marginTop = '10px';
-        fbBtn.onclick = () => requestFeedback(r.question, r.transcript, fb, fbBtn, r.duration);
+        fbBtn.textContent = r.feedback ? '🤖 피드백 다시 받기' : '🤖 AI 피드백';
+        fbBtn.onclick = () => {
+          fb.classList.remove('hidden');
+          requestFeedback(r.question, r.transcript, fb, fbBtn, r.duration,
+            (fullText) => { if (fullText) updateRecording(r.id, { feedback: fullText }); });
+        };
         actions.appendChild(fbBtn);
-        div.appendChild(fb);
       }
       const delBtn = document.createElement('button');
       delBtn.className = 'btn ghost';
       delBtn.textContent = '🗑️ 삭제';
       delBtn.onclick = () => { deleteRecording(r.id); div.remove(); };
       actions.appendChild(delBtn);
+      div.appendChild(fb);
       div.appendChild(actions);
       list.appendChild(div);
     });
@@ -743,6 +776,7 @@ function bind() {
       if (nav === 'mock') {
         show('mock-setup');
       } else if (nav === 'history') {
+        document.querySelectorAll('[data-hfilter]').forEach((b) => b.classList.toggle('active', b.dataset.hfilter === 'all'));
         renderHistory();
         show('history');
       } else {
@@ -779,17 +813,16 @@ function bind() {
   $('btn-finish').onclick = async () => {
     await stopAndWait();
     stopQuestionTimer();
-    archiveCurrentAnswer();
-    if (state.mockResults.some((r) => r.transcript || r.audioBlob)) showSessionResult();
+    await archiveCurrentAnswer();
+    if (state.mockResults.some((r) => r.transcript || r.recId != null)) showSessionResult();
     else show('home');
   };
-  $('btn-feedback').onclick = () => {
-    const answer = currentTranscript();
-    if (!answer) return toast('먼저 녹음하거나 답변을 입력해주세요');
-    stopRecording();
-    $('feedback-box').classList.remove('hidden');
-    requestFeedback(state.queue[state.qIndex].text, answer, $('feedback-content'), $('btn-feedback'), state.recDuration);
-  };
+  document.querySelectorAll('[data-hfilter]').forEach((btn) => {
+    btn.onclick = () => {
+      document.querySelectorAll('[data-hfilter]').forEach((b) => b.classList.toggle('active', b === btn));
+      renderHistory(btn.dataset.hfilter);
+    };
+  });
   $('btn-correct').onclick = () => {
     const script = $('script-input').value.trim();
     if (!script) return toast('첨삭받을 스크립트를 입력해주세요');
@@ -809,7 +842,12 @@ function bind() {
     btn.disabled = true;
     $('overall-grade-box').classList.remove('hidden');
     const system = state.mode === 'mock' ? MOCK_EVAL_SYSTEM : TOPIC_EVAL_SYSTEM;
-    callClaude(system, buildMockEvalPrompt(), $('overall-grade-content'), () => { btn.disabled = false; });
+    callClaude(system, buildMockEvalPrompt(), $('overall-grade-content'), (fullText) => {
+      btn.disabled = false;
+      // 종합 평가도 녹음 기록(세션 첫 문항)에 저장
+      const firstRec = state.mockResults.find((r) => r.recId != null);
+      if (fullText && firstRec) updateRecording(firstRec.recId, { sessionFeedback: fullText });
+    });
   };
 }
 

@@ -164,6 +164,15 @@ audio { width: 100%; margin-top: 14px; }
 
 .empty-msg { color: var(--muted); padding: 30px 0; text-align: center; }
 
+/* 녹음 기록 필터 & 날짜 구분 */
+.h-filter { display: flex; gap: 8px; margin-bottom: 16px; }
+.h-filter .btn.active { background: linear-gradient(90deg, var(--accent), var(--accent-2)); border: none; }
+.day-label {
+  font-size: 15px; font-weight: 700; margin: 22px 0 4px;
+  padding-bottom: 6px; border-bottom: 1px solid var(--border);
+}
+.saved-feedback { margin-top: 10px; border-top: 1px dashed var(--border); padding-top: 10px; }
+
 /* 로딩 */
 .loading-dots::after {
   content: ''; animation: dots 1.2s steps(4) infinite;
