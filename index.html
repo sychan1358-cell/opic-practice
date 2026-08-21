@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>OPIc 연습실</title>
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="style.css?v=4" />
 </head>
 <body>
   <header class="topbar">
@@ -94,7 +94,7 @@
 
     <!-- 모의고사 결과 화면 -->
     <section id="view-mock-result" class="view hidden">
-      <h2>📊 모의고사 완료!</h2>
+      <h2 id="result-title">📊 모의고사 완료!</h2>
       <p class="intro">각 문항의 녹음과 답변을 확인하고 AI 피드백을 받아보세요.</p>
       <button class="btn primary" id="btn-overall-grade">🏆 종합 등급 예측 받기</button>
       <div class="feedback-box hidden" id="overall-grade-box" style="margin-bottom:18px">
@@ -146,7 +146,7 @@
 
   <div class="toast hidden" id="toast"></div>
 
-  <script src="questions.js"></script>
-  <script src="app.js"></script>
+  <script src="questions.js?v=4"></script>
+  <script src="app.js?v=4"></script>
 </body>
 </html>

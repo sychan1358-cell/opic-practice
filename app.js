@@ -285,10 +285,8 @@ function archiveCurrentAnswer() {
       duration: state.recDuration,
     };
     saveRecording(entry);
-    if (state.mode === 'mock') {
-      state.mockResults.push({ ...q, transcript, audioBlob: state.audioBlob, duration: state.recDuration });
-    }
-  } else if (state.mode === 'mock') {
+    state.mockResults.push({ ...q, transcript, audioBlob: state.audioBlob, duration: state.recDuration });
+  } else {
     state.mockResults.push({ ...q, transcript: '', audioBlob: null, duration: 0 });
   }
 }
@@ -300,17 +298,19 @@ async function nextQuestion() {
   state.recDuration = 0;
   state.stopPromise = null;
   if (state.qIndex + 1 >= state.queue.length) {
-    if (state.mode === 'mock') showMockResult();
-    else { toast('연습 완료! 수고했어요 🎉'); show('home'); }
+    showSessionResult();
     return;
   }
   state.qIndex++;
   renderQuestion();
 }
 
-// ===== 모의고사 결과 =====
-function showMockResult() {
+// ===== 세션 결과 (모의고사 / 주제별 연습 공용) =====
+function showSessionResult() {
   stopQuestionTimer();
+  const isMock = state.mode === 'mock';
+  $('result-title').textContent = isMock ? '📊 모의고사 완료!' : '🎯 주제 연습 완료!';
+  $('btn-overall-grade').textContent = isMock ? '🏆 종합 등급 예측 받기' : '🏆 주제 종합 피드백 받기';
   $('overall-grade-box').classList.add('hidden');
   $('overall-grade-content').innerHTML = '';
   $('btn-overall-grade').disabled = false;
@@ -411,6 +411,24 @@ Respond in Korean with this Markdown structure:
 
 All explanations in Korean, example English phrases in English.`;
 
+const TOPIC_EVAL_SYSTEM = `You are an expert OPIc (Oral Proficiency Interview - computer) coach. The student is Korean and aiming for IH (Intermediate High) to AL (Advanced Low). They just finished practicing one topic with several questions of increasing difficulty (description, habits, past experience, comparison, issue). You are given each question, the student's transcribed spoken answer, and speech stats where available (ignore punctuation/capitalization issues from transcription; a comfortable pace is roughly 110-150 words per minute).
+
+Respond in Korean with this Markdown structure:
+
+## 🏆 이 주제 종합 평가
+**(현재 수준: IL / IM1 / IM2 / IM3 / IH / AL 중 추정)** — 이 주제에서의 강점과 약점을 두세 문장으로.
+
+## 💬 문항별 피드백
+(답변한 문항마다 "Q1: ..." 형태로 — 가장 중요한 문법/표현 교정 1-2개("잘못된 표현 → 교정" 형식)와 한줄평. 답변 안 한 문항은 생략)
+
+## ✨ 이 주제 필수 표현
+(이 주제의 답변에서 바로 쓸 수 있는 IH~AL급 영어 표현·콜로케이션 6-8개, 각각 짧은 예문과 함께. 학생이 이미 쓴 표현 말고 업그레이드가 되는 것들로)
+
+## 📈 다음 연습 포인트
+(이 주제를 다시 연습할 때 집중할 것 2-3가지, 구체적으로)
+
+All explanations in Korean, example sentences in English.`;
+
 function buildMockEvalPrompt() {
   const lines = state.mockResults.map((r) => {
     let block = `[Q${r.number}] (${r.topic.replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, '').trim()})\n${r.text}\n`;
@@ -423,7 +441,10 @@ function buildMockEvalPrompt() {
     }
     return block;
   });
-  return `Here is the student's full mock OPIc exam:\n\n${lines.join('\n\n')}`;
+  const intro = state.mode === 'mock'
+    ? "Here is the student's full mock OPIc exam:"
+    : "Here is the student's topic practice session:";
+  return `${intro}\n\n${lines.join('\n\n')}`;
 }
 
 async function callClaude(system, userText, targetEl, onDone) {
@@ -632,7 +653,7 @@ function bind() {
     await stopAndWait();
     stopQuestionTimer();
     archiveCurrentAnswer();
-    if (state.mode === 'mock' && state.mockResults.length > 0) showMockResult();
+    if (state.mockResults.some((r) => r.transcript || r.audioBlob)) showSessionResult();
     else show('home');
   };
   $('btn-feedback').onclick = () => {
@@ -656,11 +677,12 @@ function bind() {
   $('btn-overall-grade').onclick = () => {
     const answered = state.mockResults.filter((r) => r.transcript).length;
     if (answered === 0) return toast('답변한 문항이 없어 종합 평가를 할 수 없어요');
-    if (answered < 5) toast(`답변한 문항이 ${answered}개뿐이라 예측 정확도가 낮을 수 있어요`, 3500);
+    if (state.mode === 'mock' && answered < 5) toast(`답변한 문항이 ${answered}개뿐이라 예측 정확도가 낮을 수 있어요`, 3500);
     const btn = $('btn-overall-grade');
     btn.disabled = true;
     $('overall-grade-box').classList.remove('hidden');
-    callClaude(MOCK_EVAL_SYSTEM, buildMockEvalPrompt(), $('overall-grade-content'), () => { btn.disabled = false; });
+    const system = state.mode === 'mock' ? MOCK_EVAL_SYSTEM : TOPIC_EVAL_SYSTEM;
+    callClaude(system, buildMockEvalPrompt(), $('overall-grade-content'), () => { btn.disabled = false; });
   };
 }
 
