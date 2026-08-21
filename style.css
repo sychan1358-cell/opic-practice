@@ -173,6 +173,22 @@ audio { width: 100%; margin-top: 14px; }
 }
 .saved-feedback { margin-top: 10px; border-top: 1px dashed var(--border); padding-top: 10px; }
 
+/* 표현 연습 */
+.drill-card { text-align: center; padding: 36px 20px; }
+.drill-meaning { font-size: 22px; font-weight: 700; margin: 10px 0 4px; }
+.drill-answer { margin-top: 18px; padding-top: 16px; border-top: 1px dashed var(--border); }
+.drill-expr { font-size: 20px; font-weight: 700; color: var(--accent); margin-bottom: 8px; }
+.drill-example { font-size: 15px; color: var(--muted); line-height: 1.6; }
+.expr-item {
+  background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+  padding: 14px 16px; margin-bottom: 10px;
+}
+.expr-item .e-text { font-weight: 700; color: var(--accent); }
+.expr-item .e-meaning { font-size: 14px; margin: 2px 0; }
+.expr-item .e-example { font-size: 13px; color: var(--muted); line-height: 1.5; }
+.expr-item .e-meta { font-size: 12px; color: var(--muted); margin-top: 6px; }
+.expr-item .h-actions { margin-top: 8px; }
+
 /* 로딩 */
 .loading-dots::after {
   content: ''; animation: dots 1.2s steps(4) infinite;

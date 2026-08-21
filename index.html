@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>OPIc 연습실</title>
-  <link rel="stylesheet" href="style.css?v=8" />
+  <link rel="stylesheet" href="style.css?v=9" />
 </head>
 <body>
   <header class="topbar">
@@ -37,6 +37,11 @@
           <span class="menu-icon">🎧</span>
           <span class="menu-title">녹음 기록</span>
           <span class="menu-desc">지난 녹음 다시듣기</span>
+        </button>
+        <button class="menu-card" data-nav="expr">
+          <span class="menu-icon">💪</span>
+          <span class="menu-title">표현 연습</span>
+          <span class="menu-desc">피드백 속 추천 표현 암기 카드</span>
         </button>
       </div>
       <div class="notice" id="mic-notice"></div>
@@ -192,6 +197,37 @@
       <div id="history-list"></div>
     </section>
 
+    <!-- 표현 연습: 목록 -->
+    <section id="view-expr" class="view hidden">
+      <h2>💪 표현 연습</h2>
+      <p class="intro">AI 피드백과 첨삭에서 추천한 표현이 자동으로 여기 저장됩니다.<br>암기 카드로 연습해보세요 — 틀린 표현이 우선적으로 다시 나와요.</p>
+      <button class="btn primary" id="btn-start-drill">🃏 연습 시작</button>
+      <div id="expr-list" style="margin-top:18px"></div>
+    </section>
+
+    <!-- 표현 연습: 암기 카드 -->
+    <section id="view-expr-drill" class="view hidden">
+      <div class="q-header">
+        <span id="drill-progress" class="q-progress"></span>
+      </div>
+      <div class="q-card drill-card">
+        <div class="q-topic" id="drill-source"></div>
+        <div class="drill-meaning" id="drill-meaning"></div>
+        <div class="drill-answer hidden" id="drill-answer">
+          <div class="drill-expr" id="drill-expr"></div>
+          <div class="drill-example" id="drill-example"></div>
+        </div>
+      </div>
+      <div class="q-bottom-actions" style="justify-content:center">
+        <button class="btn primary" id="btn-reveal">💬 정답 보기</button>
+        <button class="btn hidden" id="btn-listen-expr">🔊 듣기</button>
+        <button class="btn hidden" id="btn-know">🙆 외웠어요</button>
+        <button class="btn ghost hidden" id="btn-again">🙅 다시</button>
+        <button class="btn ghost" id="btn-drill-quit">종료</button>
+      </div>
+      <p class="hint" style="text-align:center">한국어 뜻을 보고 소리 내어 영어로 말해본 다음 정답을 확인하세요!</p>
+    </section>
+
     <!-- 설정 -->
     <section id="view-settings" class="view hidden">
       <h2>⚙️ 설정</h2>
@@ -219,7 +255,7 @@
 
   <div class="toast hidden" id="toast"></div>
 
-  <script src="questions.js?v=8"></script>
-  <script src="app.js?v=8"></script>
+  <script src="questions.js?v=9"></script>
+  <script src="app.js?v=9"></script>
 </body>
 </html>

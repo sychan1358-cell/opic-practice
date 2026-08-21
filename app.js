@@ -24,7 +24,7 @@ const state = {
 };
 
 const $ = (id) => document.getElementById(id);
-const views = ['home', 'mock-setup', 'mock-adjust', 'practice', 'question', 'mock-result', 'script', 'history', 'settings'];
+const views = ['home', 'mock-setup', 'mock-adjust', 'practice', 'question', 'mock-result', 'script', 'history', 'settings', 'expr', 'expr-drill'];
 
 const DIFF_INFO = {
   '1': { label: '1단계', prompt: 'Level 1 of 6 (lowest). Only short, simple description and habit tasks plus role-plays were tested — no past narration, comparison, or issue questions. On a real OPIc at this level, ratings above IL are rarely awarded because higher-level functions are never tested; cap your rating at IL and if the student performed well, strongly advise retaking at a higher level.' },
@@ -67,9 +67,15 @@ const settings = {
 let db = null;
 function openDB() {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open('opic-practice', 1);
+    const req = indexedDB.open('opic-practice', 2);
     req.onupgradeneeded = () => {
-      req.result.createObjectStore('recordings', { keyPath: 'id', autoIncrement: true });
+      const d = req.result;
+      if (!d.objectStoreNames.contains('recordings')) {
+        d.createObjectStore('recordings', { keyPath: 'id', autoIncrement: true });
+      }
+      if (!d.objectStoreNames.contains('expressions')) {
+        d.createObjectStore('expressions', { keyPath: 'id', autoIncrement: true });
+      }
     };
     req.onsuccess = () => { db = req.result; resolve(db); };
     req.onerror = () => reject(req.error);
@@ -123,6 +129,63 @@ function getRecordings() {
 function deleteRecording(id) {
   if (!db) return;
   db.transaction('recordings', 'readwrite').objectStore('recordings').delete(id);
+}
+
+// ===== 표현 노트 (IndexedDB) =====
+function getExpressions() {
+  return new Promise((resolve) => {
+    if (!db) return resolve([]);
+    const req = db.transaction('expressions', 'readonly').objectStore('expressions').getAll();
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => resolve([]);
+  });
+}
+
+async function saveExpressions(items, source) {
+  if (!db || !items.length) return 0;
+  const existing = await getExpressions();
+  const seen = new Set(existing.map((e) => e.text.toLowerCase()));
+  const store = db.transaction('expressions', 'readwrite').objectStore('expressions');
+  let added = 0;
+  for (const it of items) {
+    const key = it.text.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    store.add({ ...it, source, date: new Date().toISOString(), correct: 0, wrong: 0 });
+    added++;
+  }
+  return added;
+}
+
+function updateExpression(id, patch) {
+  if (!db || id == null) return;
+  const store = db.transaction('expressions', 'readwrite').objectStore('expressions');
+  const req = store.get(id);
+  req.onsuccess = () => { if (req.result) store.put({ ...req.result, ...patch }); };
+}
+
+function deleteExpression(id) {
+  if (!db) return;
+  db.transaction('expressions', 'readwrite').objectStore('expressions').delete(id);
+}
+
+// 피드백 본문에서 '## 💾 연습 표현 목록' 섹션을 파싱해 표현 노트에 저장하고, 표시/저장용 본문에서는 제거
+async function harvestExpressions(fullText, source, targetEl) {
+  const idx = fullText.indexOf('## 💾');
+  if (idx === -1) return fullText;
+  const section = fullText.slice(idx);
+  const stripped = fullText.slice(0, idx).trim();
+  const items = [];
+  for (const line of section.split('\n')) {
+    const m = line.match(/^[-*]\s*(.+?)\s*::\s*(.+?)\s*::\s*(.+)$/);
+    if (m) items.push({ text: m[1].trim(), example: m[2].trim(), meaning: m[3].trim() });
+  }
+  if (items.length) {
+    const added = await saveExpressions(items, source);
+    if (added > 0) toast(`💪 새 표현 ${added}개가 '표현 연습'에 저장됐어요`, 3500);
+  }
+  if (targetEl) targetEl.innerHTML = renderMarkdown(stripped);
+  return stripped;
 }
 
 // ===== TTS (질문 읽기) =====
@@ -435,7 +498,17 @@ function showSessionResult() {
 }
 
 // ===== Claude API =====
-const FEEDBACK_SYSTEM = `You are an expert OPIc (Oral Proficiency Interview - computer) rater and English speaking coach. The student is Korean and aiming for IH (Intermediate High) to AL (Advanced Low).
+// 모든 피드백 끝에 붙는 기계 파싱용 표현 섹션 (앱이 추출해 '표현 연습'에 저장)
+const EXPR_SECTION = `
+
+At the very end, always include this final section for the app to parse (exact format, one line per item):
+
+## 💾 연습 표현 목록
+- expression :: short example sentence :: 한국어 뜻
+
+Pick the 3-6 expressions from your feedback that are most worth memorizing and practicing. Follow the "A :: B :: C" line format exactly — the app parses it automatically.`;
+
+const FEEDBACK_SYSTEM_BASE = `You are an expert OPIc (Oral Proficiency Interview - computer) rater and English speaking coach. The student is Korean and aiming for IH (Intermediate High) to AL (Advanced Low).
 
 Given the OPIc question and the student's spoken answer (transcribed, so ignore punctuation/capitalization issues from transcription), provide feedback in Korean. When [Speech stats] are provided (speaking time, pace, filler words), use them to evaluate delivery: a comfortable OPIc pace is roughly 110-150 words per minute; under ~90 suggests hesitation, over ~170 may hurt clarity; a strong answer is usually 45 seconds to 2 minutes. Structure your response in Markdown exactly like this:
 
@@ -458,6 +531,7 @@ Given the OPIc question and the student's spoken answer (transcribed, so ignore 
 (학생의 답변 내용을 살리되 IH~AL 수준으로 다듬은 영어 모범 답안. 말하기용이므로 자연스러운 구어체로, 45초~1분 분량)
 
 Keep the total response focused and practical. All explanations in Korean, example sentences in English.`;
+const FEEDBACK_SYSTEM = FEEDBACK_SYSTEM_BASE + EXPR_SECTION;
 
 // 목표 등급별 첨삭 기준
 const SCRIPT_GRADE_GUIDE = {
@@ -488,7 +562,7 @@ Respond in Korean with this Markdown structure:
 ## 💡 ${grade} 달성 팁
 (목표 등급에 도달하기 위해 이 스크립트에서 연습할 포인트 2-3가지)
 
-All explanations in Korean, script in English.`;
+All explanations in Korean, script in English.` + EXPR_SECTION;
 }
 
 const MOCK_EVAL_SYSTEM = `You are an official OPIc (Oral Proficiency Interview - computer) rater. The student is Korean and aiming for IH (Intermediate High) to AL (Advanced Low). You are given a full 15-question mock OPIc exam: each question, the student's transcribed spoken answer, and speech stats where available (ignore punctuation/capitalization issues from transcription; a comfortable pace is roughly 110-150 words per minute).
@@ -513,7 +587,7 @@ Respond in Korean with this Markdown structure:
 ## 💬 문항별 한줄평
 (답변한 문항만: "Q3: ..." 형태로 각 한 줄. 답변 안 한 문항은 묶어서 언급)
 
-All explanations in Korean, example English phrases in English.`;
+All explanations in Korean, example English phrases in English.` + EXPR_SECTION;
 
 const TOPIC_EVAL_SYSTEM = `You are an expert OPIc (Oral Proficiency Interview - computer) coach. The student is Korean and aiming for IH (Intermediate High) to AL (Advanced Low). They just finished practicing one topic with several questions of increasing difficulty (description, habits, past experience, comparison, issue). You are given each question, the student's transcribed spoken answer, and speech stats where available (ignore punctuation/capitalization issues from transcription; a comfortable pace is roughly 110-150 words per minute).
 
@@ -531,7 +605,7 @@ Respond in Korean with this Markdown structure:
 ## 📈 다음 연습 포인트
 (이 주제를 다시 연습할 때 집중할 것 2-3가지, 구체적으로)
 
-All explanations in Korean, example sentences in English.`;
+All explanations in Korean, example sentences in English.` + EXPR_SECTION;
 
 function buildMockEvalPrompt() {
   const lines = state.mockResults.map((r) => {
@@ -628,9 +702,10 @@ function requestFeedback(question, answer, targetEl, btn, durationSec, onDone) {
   const stats = speechStats(answer, durationSec);
   const user = `[OPIc Question]\n${question}\n\n[Student's spoken answer (transcribed)]\n${answer}`
     + (stats ? `\n\n[Speech stats]\n${stats}` : '');
-  callClaude(FEEDBACK_SYSTEM, user, targetEl, (fullText) => {
+  callClaude(FEEDBACK_SYSTEM, user, targetEl, async (fullText) => {
     if (btn) btn.disabled = false;
-    if (onDone) onDone(fullText);
+    const stripped = await harvestExpressions(fullText, question.split(/[.?]/)[0].slice(0, 60), targetEl);
+    if (onDone) onDone(stripped);
   });
 }
 
@@ -778,6 +853,97 @@ async function renderHistory(filter = 'all') {
   });
 }
 
+// ===== 표현 연습 (암기 카드) =====
+const drill = { items: [], idx: 0 };
+
+async function renderExprList() {
+  const list = $('expr-list');
+  list.innerHTML = '';
+  const items = (await getExpressions()).reverse();
+  $('btn-start-drill').disabled = items.length === 0;
+  if (items.length === 0) {
+    list.innerHTML = '<div class="empty-msg">저장된 표현이 없습니다.<br>AI 피드백이나 스크립트 첨삭을 받으면 추천 표현이 자동으로 저장돼요!</div>';
+    return;
+  }
+  items.forEach((e) => {
+    const div = document.createElement('div');
+    div.className = 'expr-item';
+    div.innerHTML = `
+      <div class="e-text">${escapeHtml(e.text)}</div>
+      <div class="e-meaning">${escapeHtml(e.meaning)}</div>
+      <div class="e-example">"${escapeHtml(e.example)}"</div>
+      <div class="e-meta">출처: ${escapeHtml(e.source || '')} · 🙆 ${e.correct || 0} / 🙅 ${e.wrong || 0}</div>
+    `;
+    const actions = document.createElement('div');
+    actions.className = 'h-actions';
+    const listenBtn = document.createElement('button');
+    listenBtn.className = 'btn ghost';
+    listenBtn.textContent = '🔊 듣기';
+    listenBtn.onclick = () => speakQuestion(`${e.text}. ${e.example}`);
+    const delBtn = document.createElement('button');
+    delBtn.className = 'btn ghost';
+    delBtn.textContent = '🗑️ 삭제';
+    delBtn.onclick = () => { deleteExpression(e.id); div.remove(); };
+    actions.appendChild(listenBtn);
+    actions.appendChild(delBtn);
+    div.appendChild(actions);
+    list.appendChild(div);
+  });
+}
+
+async function startDrill() {
+  const items = await getExpressions();
+  if (!items.length) return toast('저장된 표현이 없어요. 먼저 AI 피드백을 받아보세요!');
+  // 틀린 횟수가 많고 맞춘 횟수가 적은 표현 우선, 최대 10개
+  drill.items = items
+    .sort((a, b) => ((a.correct || 0) - (a.wrong || 0)) - ((b.correct || 0) - (b.wrong || 0)) || Math.random() - 0.5)
+    .slice(0, 10)
+    .sort(() => Math.random() - 0.5);
+  drill.idx = 0;
+  show('expr-drill');
+  renderDrillCard();
+}
+
+function renderDrillCard() {
+  const e = drill.items[drill.idx];
+  $('drill-progress').textContent = `카드 ${drill.idx + 1} / ${drill.items.length}`;
+  $('drill-source').textContent = e.source || '';
+  $('drill-meaning').textContent = e.meaning;
+  $('drill-expr').textContent = e.text;
+  $('drill-example').textContent = `"${e.example}"`;
+  $('drill-answer').classList.add('hidden');
+  $('btn-reveal').classList.remove('hidden');
+  $('btn-listen-expr').classList.add('hidden');
+  $('btn-know').classList.add('hidden');
+  $('btn-again').classList.add('hidden');
+}
+
+function revealDrill() {
+  $('drill-answer').classList.remove('hidden');
+  $('btn-reveal').classList.add('hidden');
+  $('btn-listen-expr').classList.remove('hidden');
+  $('btn-know').classList.remove('hidden');
+  $('btn-again').classList.remove('hidden');
+  const e = drill.items[drill.idx];
+  speakQuestion(`${e.text}. ${e.example}`);
+}
+
+function answerDrill(known) {
+  const e = drill.items[drill.idx];
+  updateExpression(e.id, known
+    ? { correct: (e.correct || 0) + 1, lastPracticed: new Date().toISOString() }
+    : { wrong: (e.wrong || 0) + 1, lastPracticed: new Date().toISOString() });
+  if (!known) drill.items.push(e); // 틀린 카드는 이번 라운드 끝에 한 번 더
+  drill.idx++;
+  if (drill.idx >= drill.items.length) {
+    toast('🎉 연습 완료! 수고했어요');
+    renderExprList();
+    show('expr');
+    return;
+  }
+  renderDrillCard();
+}
+
 // ===== 이벤트 바인딩 =====
 function bind() {
   $('brand-home').onclick = () => { stopRecording(); stopQuestionTimer(); show('home'); };
@@ -796,6 +962,9 @@ function bind() {
         document.querySelectorAll('[data-hfilter]').forEach((b) => b.classList.toggle('active', b.dataset.hfilter === 'all'));
         renderHistory();
         show('history');
+      } else if (nav === 'expr') {
+        renderExprList();
+        show('expr');
       } else {
         show(nav);
       }
@@ -851,9 +1020,21 @@ function bind() {
     $('script-feedback-box').classList.remove('hidden');
     const btn = $('btn-correct');
     btn.disabled = true;
-    callClaude(scriptSystem(grade), user, $('script-feedback-content'), () => { btn.disabled = false; });
+    callClaude(scriptSystem(grade), user, $('script-feedback-content'), async (fullText) => {
+      btn.disabled = false;
+      await harvestExpressions(fullText, `스크립트 첨삭 (${grade})`, $('script-feedback-content'));
+    });
   };
   $('btn-mock-home').onclick = () => show('home');
+  $('btn-start-drill').onclick = startDrill;
+  $('btn-reveal').onclick = revealDrill;
+  $('btn-listen-expr').onclick = () => {
+    const e = drill.items[drill.idx];
+    speakQuestion(`${e.text}. ${e.example}`);
+  };
+  $('btn-know').onclick = () => answerDrill(true);
+  $('btn-again').onclick = () => answerDrill(false);
+  $('btn-drill-quit').onclick = () => { speechSynthesis.cancel(); renderExprList(); show('expr'); };
   $('btn-overall-grade').onclick = () => {
     const answered = state.mockResults.filter((r) => r.transcript).length;
     if (answered === 0) return toast('답변한 문항이 없어 종합 평가를 할 수 없어요');
@@ -862,11 +1043,12 @@ function bind() {
     btn.disabled = true;
     $('overall-grade-box').classList.remove('hidden');
     const system = state.mode === 'mock' ? MOCK_EVAL_SYSTEM : TOPIC_EVAL_SYSTEM;
-    callClaude(system, buildMockEvalPrompt(), $('overall-grade-content'), (fullText) => {
+    callClaude(system, buildMockEvalPrompt(), $('overall-grade-content'), async (fullText) => {
       btn.disabled = false;
+      const stripped = await harvestExpressions(fullText, state.mode === 'mock' ? '모의고사 종합 평가' : '주제 종합 피드백', $('overall-grade-content'));
       // 종합 평가도 녹음 기록(세션 첫 문항)에 저장
       const firstRec = state.mockResults.find((r) => r.recId != null);
-      if (fullText && firstRec) updateRecording(firstRec.recId, { sessionFeedback: fullText });
+      if (stripped && firstRec) updateRecording(firstRec.recId, { sessionFeedback: stripped });
     });
   };
 }
