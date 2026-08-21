@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>OPIc 연습실</title>
-  <link rel="stylesheet" href="style.css?v=9" />
+  <link rel="stylesheet" href="style.css?v=11" />
 </head>
 <body>
   <header class="topbar">
@@ -42,6 +42,11 @@
           <span class="menu-icon">💪</span>
           <span class="menu-title">표현 연습</span>
           <span class="menu-desc">피드백 속 추천 표현 암기 카드</span>
+        </button>
+        <button class="menu-card" data-nav="study">
+          <span class="menu-icon">📚</span>
+          <span class="menu-title">학습 자료</span>
+          <span class="menu-desc">만능 문장 · 필러 · 연결어 · 고득점 어휘</span>
         </button>
       </div>
       <div class="notice" id="mic-notice"></div>
@@ -197,6 +202,14 @@
       <div id="history-list"></div>
     </section>
 
+    <!-- 학습 자료 -->
+    <section id="view-study" class="view hidden">
+      <h2>📚 학습 자료</h2>
+      <p class="intro" id="study-desc"></p>
+      <div class="h-filter" id="study-tabs" style="flex-wrap:wrap"></div>
+      <div id="study-list"></div>
+    </section>
+
     <!-- 표현 연습: 목록 -->
     <section id="view-expr" class="view hidden">
       <h2>💪 표현 연습</h2>
@@ -255,7 +268,8 @@
 
   <div class="toast hidden" id="toast"></div>
 
-  <script src="questions.js?v=9"></script>
-  <script src="app.js?v=9"></script>
+  <script src="questions.js?v=11"></script>
+  <script src="study.js?v=11"></script>
+  <script src="app.js?v=11"></script>
 </body>
 </html>

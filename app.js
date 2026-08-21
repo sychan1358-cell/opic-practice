@@ -24,7 +24,7 @@ const state = {
 };
 
 const $ = (id) => document.getElementById(id);
-const views = ['home', 'mock-setup', 'mock-adjust', 'practice', 'question', 'mock-result', 'script', 'history', 'settings', 'expr', 'expr-drill'];
+const views = ['home', 'mock-setup', 'mock-adjust', 'practice', 'question', 'mock-result', 'script', 'history', 'settings', 'expr', 'expr-drill', 'study'];
 
 const DIFF_INFO = {
   '1': { label: '1단계', prompt: 'Level 1 of 6 (lowest). Only short, simple description and habit tasks plus role-plays were tested — no past narration, comparison, or issue questions. On a real OPIc at this level, ratings above IL are rarely awarded because higher-level functions are never tested; cap your rating at IL and if the student performed well, strongly advise retaking at a higher level.' },
@@ -524,6 +524,15 @@ Given the OPIc question and the student's spoken answer (transcribed, so ignore 
 ## 🔧 문법·표현 교정
 (잘못된 문장 → 교정된 문장 형태로, 각 항목에 짧은 한국어 설명. 최대 5개)
 
+## 🎯 등급 상승 구체 코칭
+This section is the heart of the feedback. Act like a private speaking coach who just listened to this exact answer. Every point MUST quote the student's actual words — never give generic advice that could apply to anyone's answer. Cover only the categories that genuinely apply to this answer, choosing from:
+- **🔁 반복 표현 다양화**: 학생이 2번 이상 반복한 단어·표현을 찾아 인용하고, 각각을 대체할 표현 2-3개를 제시 (예: 학생이 "good"을 4번 썼다면 → amazing / decent / worthwhile 등 문맥별 대체)
+- **🗣️ 발음 주의 포인트**: 학생이 실제로 사용한 단어 중 한국인 학습자가 흔히 어색하게 발음하는 것을 골라, 어떻게 발음해야 하는지 구체적으로 (강세 위치, 주의할 소리)
+- **🔗 연음(linking)**: 학생의 실제 문장에서 이어 말해야 자연스러운 구간을 인용해 표시 (예: "I want to go" → "I wanna go", "not at all" → "no-ta-tall"처럼 소리 나는 대로)
+- **🎵 리듬·강세**: 학생의 실제 문장 하나를 골라 어떤 단어에 강세를 두고 어디서 끊어 말할지 표시 (예: "I REALLY love it / because it helps me RELAX")
+- **🏗️ 문장 구조 다양화**: 문장 시작 패턴이 단조로우면 (예: 계속 "I..."로 시작) 인용해서 지적하고 다른 시작법 예시
+Note: the transcript has no audio, so pronunciation/linking/rhythm advice should target likely pitfalls for Korean speakers based on the specific words and sentences the student actually used.
+
 ## ✨ IH~AL로 올리는 표현
 (답변에 쓸 수 있었던 고급 표현/필러/연결어 3-4개와 사용 예문)
 
@@ -582,7 +591,7 @@ Respond in Korean with this Markdown structure:
 - **유창성·전달력**: 속도, 답변 길이, 필러 사용 종합 평가
 
 ## 📈 등급을 올리는 우선순위 3가지
-(현재 답변에서 드러난 약점 중 등급에 가장 큰 영향을 주는 순서로, 구체적인 연습 방법과 함께)
+(현재 답변에서 드러난 약점 중 등급에 가장 큰 영향을 주는 순서로. 각 항목은 반드시 학생 답변의 실제 문장이나 단어를 인용하며, 반복 어휘 대체·발음 주의 단어·연음할 구간·리듬과 강세·문장 구조 다양화처럼 바로 고칠 수 있는 구체적 행동으로 제시할 것 — 누구에게나 통하는 일반론 금지)
 
 ## 💬 문항별 한줄평
 (답변한 문항만: "Q3: ..." 형태로 각 한 줄. 답변 안 한 문항은 묶어서 언급)
@@ -597,7 +606,7 @@ Respond in Korean with this Markdown structure:
 **(현재 수준: IL / IM1 / IM2 / IM3 / IH / AL 중 추정)** — 이 주제에서의 강점과 약점을 두세 문장으로.
 
 ## 💬 문항별 피드백
-(답변한 문항마다 "Q1: ..." 형태로 — 가장 중요한 문법/표현 교정 1-2개("잘못된 표현 → 교정" 형식)와 한줄평. 답변 안 한 문항은 생략)
+(답변한 문항마다 "Q1: ..." 형태로 — 가장 중요한 문법/표현 교정 1-2개("잘못된 표현 → 교정" 형식)와, 그 답변에서 반복된 어휘·연음할 구간·강세 둘 단어 같은 구체적 개선 포인트 1개. 반드시 학생의 실제 문장을 인용할 것. 답변 안 한 문항은 생략)
 
 ## ✨ 이 주제 필수 표현
 (이 주제의 답변에서 바로 쓸 수 있는 IH~AL급 영어 표현·콜로케이션 6-8개, 각각 짧은 예문과 함께. 학생이 이미 쓴 표현 말고 업그레이드가 되는 것들로)
@@ -944,6 +953,53 @@ function answerDrill(known) {
   renderDrillCard();
 }
 
+// ===== 학습 자료 =====
+function renderStudy(sectionId) {
+  const section = STUDY_SECTIONS.find((s) => s.id === sectionId) || STUDY_SECTIONS[0];
+  $('study-desc').textContent = section.desc;
+  const tabs = $('study-tabs');
+  tabs.innerHTML = '';
+  STUDY_SECTIONS.forEach((s) => {
+    const btn = document.createElement('button');
+    btn.className = 'btn' + (s.id === section.id ? ' active' : '');
+    btn.textContent = `${s.icon} ${s.name}`;
+    btn.onclick = () => renderStudy(s.id);
+    tabs.appendChild(btn);
+  });
+  const list = $('study-list');
+  list.innerHTML = '';
+  section.items.forEach((item) => {
+    const div = document.createElement('div');
+    div.className = 'expr-item';
+    div.innerHTML = `
+      <div class="e-text">${escapeHtml(item.text)}</div>
+      <div class="e-meaning">${escapeHtml(item.meaning)}</div>
+      <div class="e-example">"${escapeHtml(item.example)}"</div>
+    `;
+    const actions = document.createElement('div');
+    actions.className = 'h-actions';
+    const listenBtn = document.createElement('button');
+    listenBtn.className = 'btn ghost';
+    listenBtn.textContent = '🔊 듣기';
+    listenBtn.onclick = () => speakQuestion(`${item.text}. ${item.example}`);
+    const addBtn = document.createElement('button');
+    addBtn.className = 'btn ghost';
+    addBtn.textContent = '💪 표현 연습에 추가';
+    addBtn.onclick = async () => {
+      const added = await saveExpressions(
+        [{ text: item.text, example: item.example, meaning: item.meaning }],
+        `학습 자료 · ${section.name}`
+      );
+      toast(added ? '💪 표현 연습에 추가됐어요' : '이미 표현 연습에 있는 표현이에요');
+      if (added) { addBtn.disabled = true; addBtn.textContent = '✅ 추가됨'; }
+    };
+    actions.appendChild(listenBtn);
+    actions.appendChild(addBtn);
+    div.appendChild(actions);
+    list.appendChild(div);
+  });
+}
+
 // ===== 이벤트 바인딩 =====
 function bind() {
   $('brand-home').onclick = () => { stopRecording(); stopQuestionTimer(); show('home'); };
@@ -965,6 +1021,9 @@ function bind() {
       } else if (nav === 'expr') {
         renderExprList();
         show('expr');
+      } else if (nav === 'study') {
+        renderStudy();
+        show('study');
       } else {
         show(nav);
       }
