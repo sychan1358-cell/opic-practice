@@ -7,6 +7,8 @@ const state = {
   mediaRecorder: null,
   audioChunks: [],
   audioBlob: null,
+  recDuration: 0,
+  stopPromise: null,
   recStartTime: null,
   recTimerId: null,
   recognition: null,
@@ -146,6 +148,8 @@ async function startRecording() {
 
   const mr = new MediaRecorder(stream);
   mr.ondataavailable = (e) => { if (e.data.size > 0) state.audioChunks.push(e.data); };
+  let resolveStop;
+  state.stopPromise = new Promise((r) => { resolveStop = r; });
   mr.onstop = () => {
     state.audioBlob = new Blob(state.audioChunks, { type: mr.mimeType || 'audio/webm' });
     const url = URL.createObjectURL(state.audioBlob);
@@ -153,6 +157,7 @@ async function startRecording() {
     player.src = url;
     player.classList.remove('hidden');
     stream.getTracks().forEach((t) => t.stop());
+    resolveStop();
   };
   mr.start();
   state.mediaRecorder = mr;
@@ -170,12 +175,31 @@ async function startRecording() {
 }
 
 function stopRecording() {
+  if (state.recording && state.recStartTime) {
+    state.recDuration = (Date.now() - state.recStartTime) / 1000;
+  }
   state.recording = false;
   if (state.recognition) { try { state.recognition.stop(); } catch (_) {} state.recognition = null; }
   if (state.mediaRecorder && state.mediaRecorder.state !== 'inactive') state.mediaRecorder.stop();
   clearInterval(state.recTimerId);
   $('btn-record').classList.remove('recording');
   $('rec-label').textContent = '녹음 시작';
+}
+
+// 녹음이 완전히 끝나(blob 생성) 저장 가능할 때까지 대기
+function stopAndWait() {
+  if (state.recording) stopRecording();
+  return state.stopPromise || Promise.resolve();
+}
+
+// 말하기 통계: 발화 속도, 필러 단어 등 (AI 유창성 피드백용)
+function speechStats(transcript, durationSec) {
+  if (!transcript || !durationSec || durationSec < 3) return null;
+  const words = transcript.trim().split(/\s+/).filter(Boolean);
+  const wpm = Math.round(words.length / (durationSec / 60));
+  const fillerPatterns = /\b(um+|uh+|er+|ah+|like|you know|i mean|well|so)\b/gi;
+  const fillers = (transcript.match(fillerPatterns) || []).length;
+  return `- Speaking time: ${Math.round(durationSec)} seconds\n- Word count: ${words.length}\n- Speaking pace: ${wpm} words per minute\n- Filler words detected (um, uh, like, you know...): ${fillers}`;
 }
 
 // ===== 질문 화면 =====
@@ -202,6 +226,7 @@ function renderQuestion() {
   $('btn-toggle-text').textContent = '👁️ 질문 숨기기';
   $('transcript').textContent = '';
   state.finalTranscript = '';
+  state.recDuration = 0;
   $('rec-time').textContent = '0:00';
   $('playback').classList.add('hidden');
   $('feedback-box').classList.add('hidden');
@@ -257,20 +282,23 @@ function archiveCurrentAnswer() {
       question: q.text,
       transcript,
       audio: state.audioBlob,
+      duration: state.recDuration,
     };
     saveRecording(entry);
     if (state.mode === 'mock') {
-      state.mockResults.push({ ...q, transcript, audioBlob: state.audioBlob });
+      state.mockResults.push({ ...q, transcript, audioBlob: state.audioBlob, duration: state.recDuration });
     }
   } else if (state.mode === 'mock') {
-    state.mockResults.push({ ...q, transcript: '', audioBlob: null });
+    state.mockResults.push({ ...q, transcript: '', audioBlob: null, duration: 0 });
   }
 }
 
-function nextQuestion() {
-  stopRecording();
+async function nextQuestion() {
+  await stopAndWait();
   archiveCurrentAnswer();
   state.audioBlob = null;
+  state.recDuration = 0;
+  state.stopPromise = null;
   if (state.qIndex + 1 >= state.queue.length) {
     if (state.mode === 'mock') showMockResult();
     else { toast('연습 완료! 수고했어요 🎉'); show('home'); }
@@ -307,7 +335,7 @@ function showMockResult() {
       const fb = document.createElement('div');
       fb.className = 'feedback-content';
       fb.style.marginTop = '10px';
-      btn.onclick = () => requestFeedback(r.text, r.transcript, fb, btn);
+      btn.onclick = () => requestFeedback(r.text, r.transcript, fb, btn, r.duration);
       div.appendChild(btn);
       div.appendChild(fb);
     }
@@ -319,10 +347,13 @@ function showMockResult() {
 // ===== Claude API =====
 const FEEDBACK_SYSTEM = `You are an expert OPIc (Oral Proficiency Interview - computer) rater and English speaking coach. The student is Korean and aiming for IH (Intermediate High) to AL (Advanced Low).
 
-Given the OPIc question and the student's spoken answer (transcribed, so ignore punctuation/capitalization issues from transcription), provide feedback in Korean. Structure your response in Markdown exactly like this:
+Given the OPIc question and the student's spoken answer (transcribed, so ignore punctuation/capitalization issues from transcription), provide feedback in Korean. When [Speech stats] are provided (speaking time, pace, filler words), use them to evaluate delivery: a comfortable OPIc pace is roughly 110-150 words per minute; under ~90 suggests hesitation, over ~170 may hurt clarity; a strong answer is usually 45 seconds to 2 minutes. Structure your response in Markdown exactly like this:
 
 ## 📊 예상 등급
 (IL / IM1 / IM2 / IM3 / IH / AL 중 하나와 한 줄 근거)
+
+## 🗣️ 유창성·전달력
+([Speech stats]가 주어진 경우에만 이 섹션 포함: 말하기 속도, 답변 길이, 필러 단어 사용에 대한 평가와 개선 팁 2-3줄. 통계가 없으면 이 섹션 생략)
 
 ## 👍 잘한 점
 (2-3개, 구체적으로)
@@ -418,9 +449,11 @@ async function callClaude(system, userText, targetEl, onDone) {
   }
 }
 
-function requestFeedback(question, answer, targetEl, btn) {
+function requestFeedback(question, answer, targetEl, btn, durationSec) {
   if (btn) btn.disabled = true;
-  const user = `[OPIc Question]\n${question}\n\n[Student's spoken answer (transcribed)]\n${answer}`;
+  const stats = speechStats(answer, durationSec);
+  const user = `[OPIc Question]\n${question}\n\n[Student's spoken answer (transcribed)]\n${answer}`
+    + (stats ? `\n\n[Speech stats]\n${stats}` : '');
   callClaude(FEEDBACK_SYSTEM, user, targetEl, () => { if (btn) btn.disabled = false; });
 }
 
@@ -485,7 +518,7 @@ async function renderHistory() {
     const date = new Date(r.date);
     const dateStr = `${date.getMonth() + 1}/${date.getDate()} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
     div.innerHTML = `
-      <div class="h-meta">${dateStr} · ${r.mode === 'mock' ? '모의고사' : '주제연습'} · ${escapeHtml(r.topic || '')}</div>
+      <div class="h-meta">${dateStr} · ${r.mode === 'mock' ? '모의고사' : '주제연습'} · ${escapeHtml(r.topic || '')}${r.duration ? ` · 🎙️ ${fmtTime(r.duration)}` : ''}</div>
       <div class="h-q">${escapeHtml(r.question || '')}</div>
       ${r.transcript ? `<div class="r-answer">${escapeHtml(r.transcript)}</div>` : ''}
     `;
@@ -497,6 +530,17 @@ async function renderHistory() {
     }
     const actions = document.createElement('div');
     actions.className = 'h-actions';
+    if (r.transcript) {
+      const fbBtn = document.createElement('button');
+      fbBtn.className = 'btn primary';
+      fbBtn.textContent = '🤖 AI 피드백';
+      const fb = document.createElement('div');
+      fb.className = 'feedback-content';
+      fb.style.marginTop = '10px';
+      fbBtn.onclick = () => requestFeedback(r.question, r.transcript, fb, fbBtn, r.duration);
+      actions.appendChild(fbBtn);
+      div.appendChild(fb);
+    }
     const delBtn = document.createElement('button');
     delBtn.className = 'btn ghost';
     delBtn.textContent = '🗑️ 삭제';
@@ -542,8 +586,8 @@ function bind() {
   };
   $('btn-record').onclick = () => state.recording ? stopRecording() : startRecording();
   $('btn-next-q').onclick = nextQuestion;
-  $('btn-finish').onclick = () => {
-    stopRecording();
+  $('btn-finish').onclick = async () => {
+    await stopAndWait();
     stopQuestionTimer();
     archiveCurrentAnswer();
     if (state.mode === 'mock' && state.mockResults.length > 0) showMockResult();
@@ -554,7 +598,7 @@ function bind() {
     if (!answer) return toast('먼저 녹음하거나 답변을 입력해주세요');
     stopRecording();
     $('feedback-box').classList.remove('hidden');
-    requestFeedback(state.queue[state.qIndex].text, answer, $('feedback-content'), $('btn-feedback'));
+    requestFeedback(state.queue[state.qIndex].text, answer, $('feedback-content'), $('btn-feedback'), state.recDuration);
   };
   $('btn-correct').onclick = () => {
     const script = $('script-input').value.trim();
