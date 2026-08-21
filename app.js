@@ -968,7 +968,15 @@ function renderStudy(sectionId) {
   });
   const list = $('study-list');
   list.innerHTML = '';
+  let lastGroup = null;
   section.items.forEach((item) => {
+    if (item.group && item.group !== lastGroup) {
+      lastGroup = item.group;
+      const g = document.createElement('h3');
+      g.className = 'group-label';
+      g.textContent = item.group;
+      list.appendChild(g);
+    }
     const div = document.createElement('div');
     div.className = 'expr-item';
     div.innerHTML = `
