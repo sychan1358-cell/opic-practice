@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>OPIc 연습실</title>
-  <link rel="stylesheet" href="style.css?v=7" />
+  <link rel="stylesheet" href="style.css?v=8" />
 </head>
 <body>
   <header class="topbar">
@@ -162,6 +162,14 @@
     <!-- 스크립트 첨삭 -->
     <section id="view-script" class="view hidden">
       <h2>✍️ 스크립트 첨삭</h2>
+      <label class="field-label">목표 등급</label>
+      <select id="script-grade" class="text-input">
+        <option value="IM1">IM1 — 기본 문장을 정확하게</option>
+        <option value="IM2">IM2 — 정확성 + 기본 연결어</option>
+        <option value="IM3">IM3 — 시제 다양화, 안정적인 문단</option>
+        <option value="IH" selected>IH — 자연스러운 구어체, 풍부한 디테일</option>
+        <option value="AL">AL — 고급 표현, 관용구, 복합 문장</option>
+      </select>
       <label class="field-label">질문 (선택사항)</label>
       <input type="text" id="script-question" class="text-input" placeholder="예: Describe your favorite room in your home." />
       <label class="field-label">내 스크립트 (영어)</label>
@@ -211,7 +219,7 @@
 
   <div class="toast hidden" id="toast"></div>
 
-  <script src="questions.js?v=7"></script>
-  <script src="app.js?v=7"></script>
+  <script src="questions.js?v=8"></script>
+  <script src="app.js?v=8"></script>
 </body>
 </html>

@@ -459,20 +459,37 @@ Given the OPIc question and the student's spoken answer (transcribed, so ignore 
 
 Keep the total response focused and practical. All explanations in Korean, example sentences in English.`;
 
-const SCRIPT_SYSTEM = `You are an expert OPIc English speaking coach. The student is Korean and aiming for IH to AL. They wrote an English script for an OPIc answer and want corrections.
+// 목표 등급별 첨삭 기준
+const SCRIPT_GRADE_GUIDE = {
+  IM1: 'Target grade: IM1. Priorities: grammatical accuracy in simple sentences (subject-verb agreement, articles, basic tenses). Keep vocabulary simple and attainable — do NOT suggest advanced idioms or complex structures the student cannot deliver. The revised script must use short, clear sentences an IM1 speaker can memorize and say naturally, about 30-45 seconds long.',
+  IM2: 'Target grade: IM2. Priorities: accuracy plus basic connectors (first of all, also, so, because) and consistent tense control. Vocabulary should stay simple; suggest only mild upgrades. The revised script should be clear multi-sentence speech an IM2 speaker can deliver, about 45 seconds long.',
+  IM3: 'Target grade: IM3. Priorities: reliable past-tense narration, varied sentence starters, paragraph-length flow with clear organization (intro → details → wrap-up). Introduce a few natural spoken expressions. The revised script should be a solid one-minute answer at IM3 level.',
+  IH: 'Target grade: IH. Priorities: natural spoken English — fillers and discourse markers (you know, actually, to be honest), varied tenses, specific details and mild comparisons, self-correction patterns. Point out stiff "written-style" sentences and make them conversational. The revised script should sound like a fluent 1-1.5 minute spoken answer at IH level.',
+  AL: 'Target grade: AL. Priorities: sophisticated and idiomatic language — collocations, phrasal verbs, hedging (I would say, it depends), complex sentences with relative clauses and conditionals, and well-supported opinions. Be strict: correct not only errors but anything unnatural or flat. The revised script should demonstrate AL-level range and precision, 1.5-2 minutes of speech.',
+};
+
+function scriptSystem(grade) {
+  const guide = SCRIPT_GRADE_GUIDE[grade] || SCRIPT_GRADE_GUIDE.IH;
+  return `You are an expert OPIc English speaking coach. The student is Korean. They wrote an English script for an OPIc answer and want corrections tailored to their target grade.
+
+${guide}
 
 Respond in Korean with this Markdown structure:
 
+## 🎯 목표 등급: ${grade}
+(이 스크립트가 현재 목표 등급 기준에 어느 정도인지 한두 문장 진단)
+
 ## 🔧 첨삭 결과
-(원문에서 고칠 부분을 "원래 문장 → 고친 문장" 형태로 나열, 각각 짧은 한국어 설명. 문법 오류뿐 아니라 어색한 표현도 포함)
+(원문에서 고칠 부분을 "원래 문장 → 고친 문장" 형태로 나열, 각각 짧은 한국어 설명. 목표 등급 기준에서 중요한 것부터)
 
 ## ✨ 수정된 전체 스크립트
-(교정 사항을 모두 반영한 전체 영어 스크립트. 자연스러운 구어체로)
+(교정 사항을 모두 반영한 전체 영어 스크립트. 반드시 목표 등급 ${grade} 수준에 맞는 어휘·문장으로 — 그 이상으로 어렵게 쓰지 말 것. 자연스러운 구어체로)
 
-## 💡 한 단계 업그레이드
-(IH~AL 수준으로 올리기 위해 추가할 수 있는 표현이나 구조 2-3가지 제안)
+## 💡 ${grade} 달성 팁
+(목표 등급에 도달하기 위해 이 스크립트에서 연습할 포인트 2-3가지)
 
 All explanations in Korean, script in English.`;
+}
 
 const MOCK_EVAL_SYSTEM = `You are an official OPIc (Oral Proficiency Interview - computer) rater. The student is Korean and aiming for IH (Intermediate High) to AL (Advanced Low). You are given a full 15-question mock OPIc exam: each question, the student's transcribed spoken answer, and speech stats where available (ignore punctuation/capitalization issues from transcription; a comfortable pace is roughly 110-150 words per minute).
 
@@ -823,15 +840,18 @@ function bind() {
       renderHistory(btn.dataset.hfilter);
     };
   });
+  $('script-grade').value = localStorage.getItem('opic_script_grade') || 'IH';
   $('btn-correct').onclick = () => {
     const script = $('script-input').value.trim();
     if (!script) return toast('첨삭받을 스크립트를 입력해주세요');
+    const grade = $('script-grade').value;
+    localStorage.setItem('opic_script_grade', grade);
     const question = $('script-question').value.trim();
     const user = (question ? `[OPIc Question]\n${question}\n\n` : '') + `[Student's script]\n${script}`;
     $('script-feedback-box').classList.remove('hidden');
     const btn = $('btn-correct');
     btn.disabled = true;
-    callClaude(SCRIPT_SYSTEM, user, $('script-feedback-content'), () => { btn.disabled = false; });
+    callClaude(scriptSystem(grade), user, $('script-feedback-content'), () => { btn.disabled = false; });
   };
   $('btn-mock-home').onclick = () => show('home');
   $('btn-overall-grade').onclick = () => {
