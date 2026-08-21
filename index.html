@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OPIc 연습실</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand" id="brand-home">🎙️ OPIc 연습실 <span class="badge">IH~AL</span></div>
+    <button class="icon-btn" id="btn-settings" title="설정">⚙️</button>
+  </header>
+
+  <main id="app">
+
+    <!-- 홈 화면 -->
+    <section id="view-home" class="view">
+      <p class="intro">실제 시험처럼 연습하고, AI 피드백으로 IH~AL을 노려보세요.</p>
+      <div class="menu-grid">
+        <button class="menu-card" data-nav="mock">
+          <span class="menu-icon">📝</span>
+          <span class="menu-title">실전 모의고사</span>
+          <span class="menu-desc">15문항 · 실제 시험 구성 그대로</span>
+        </button>
+        <button class="menu-card" data-nav="practice">
+          <span class="menu-icon">🎯</span>
+          <span class="menu-title">주제별 연습</span>
+          <span class="menu-desc">선택주제 · 돌발 · 롤플레이</span>
+        </button>
+        <button class="menu-card" data-nav="script">
+          <span class="menu-icon">✍️</span>
+          <span class="menu-title">스크립트 첨삭</span>
+          <span class="menu-desc">작성한 답변을 AI가 교정</span>
+        </button>
+        <button class="menu-card" data-nav="history">
+          <span class="menu-icon">🎧</span>
+          <span class="menu-title">녹음 기록</span>
+          <span class="menu-desc">지난 녹음 다시듣기</span>
+        </button>
+      </div>
+      <div class="notice" id="mic-notice"></div>
+    </section>
+
+    <!-- 주제별 연습: 주제 선택 -->
+    <section id="view-practice" class="view hidden">
+      <h2>주제 선택</h2>
+      <h3 class="group-label">선택 주제</h3>
+      <div class="topic-grid" id="topic-grid-main"></div>
+      <h3 class="group-label">돌발 주제</h3>
+      <div class="topic-grid" id="topic-grid-surprise"></div>
+      <h3 class="group-label">롤플레이</h3>
+      <div class="topic-grid" id="topic-grid-roleplay"></div>
+    </section>
+
+    <!-- 질문 연습 화면 (주제별/모의고사 공용) -->
+    <section id="view-question" class="view hidden">
+      <div class="q-header">
+        <span id="q-progress" class="q-progress"></span>
+        <span id="q-timer" class="q-timer hidden">2:00</span>
+      </div>
+      <div class="q-card">
+        <div class="q-topic" id="q-topic"></div>
+        <div class="q-text" id="q-text"></div>
+        <div class="q-actions">
+          <button class="btn ghost" id="btn-listen">🔊 질문 듣기</button>
+          <button class="btn ghost" id="btn-toggle-text">👁️ 질문 숨기기</button>
+        </div>
+      </div>
+
+      <div class="record-panel">
+        <button class="record-btn" id="btn-record"><span class="rec-dot"></span><span id="rec-label">녹음 시작</span></button>
+        <div class="rec-time" id="rec-time">0:00</div>
+      </div>
+
+      <div class="transcript-box" id="transcript-box">
+        <div class="transcript-label">📝 내 답변 (자동 인식)</div>
+        <div class="transcript" id="transcript" contenteditable="true" data-placeholder="녹음을 시작하면 말한 내용이 여기 표시됩니다. 직접 수정할 수도 있어요."></div>
+      </div>
+
+      <audio id="playback" controls class="hidden"></audio>
+
+      <div class="q-bottom-actions">
+        <button class="btn primary" id="btn-feedback">🤖 AI 피드백 받기</button>
+        <button class="btn" id="btn-next-q">다음 문항 →</button>
+        <button class="btn ghost" id="btn-finish">종료</button>
+      </div>
+
+      <div class="feedback-box hidden" id="feedback-box">
+        <div class="feedback-label">🤖 AI 피드백</div>
+        <div class="feedback-content" id="feedback-content"></div>
+      </div>
+    </section>
+
+    <!-- 모의고사 결과 화면 -->
+    <section id="view-mock-result" class="view hidden">
+      <h2>📊 모의고사 완료!</h2>
+      <p class="intro">각 문항의 녹음과 답변을 확인하고 AI 피드백을 받아보세요.</p>
+      <div id="mock-result-list"></div>
+      <button class="btn primary" id="btn-mock-home">홈으로</button>
+    </section>
+
+    <!-- 스크립트 첨삭 -->
+    <section id="view-script" class="view hidden">
+      <h2>✍️ 스크립트 첨삭</h2>
+      <label class="field-label">질문 (선택사항)</label>
+      <input type="text" id="script-question" class="text-input" placeholder="예: Describe your favorite room in your home." />
+      <label class="field-label">내 스크립트 (영어)</label>
+      <textarea id="script-input" class="text-area" rows="10" placeholder="첨삭받을 영어 스크립트를 입력하세요..."></textarea>
+      <button class="btn primary" id="btn-correct">🤖 첨삭 받기</button>
+      <div class="feedback-box hidden" id="script-feedback-box">
+        <div class="feedback-label">🤖 첨삭 결과</div>
+        <div class="feedback-content" id="script-feedback-content"></div>
+      </div>
+    </section>
+
+    <!-- 녹음 기록 -->
+    <section id="view-history" class="view hidden">
+      <h2>🎧 녹음 기록</h2>
+      <div id="history-list"></div>
+    </section>
+
+    <!-- 설정 -->
+    <section id="view-settings" class="view hidden">
+      <h2>⚙️ 설정</h2>
+      <label class="field-label">Anthropic API 키 (AI 피드백/첨삭에 필요)</label>
+      <input type="password" id="api-key-input" class="text-input" placeholder="sk-ant-..." />
+      <p class="hint">키는 이 브라우저(localStorage)에만 저장되며 Anthropic API 호출에만 사용됩니다.<br>
+      키 발급: <a href="https://console.anthropic.com/" target="_blank">console.anthropic.com</a></p>
+      <label class="field-label">답변 제한시간 (모의고사)</label>
+      <select id="timer-select" class="text-input">
+        <option value="90">1분 30초</option>
+        <option value="120" selected>2분</option>
+        <option value="150">2분 30초</option>
+        <option value="0">제한 없음</option>
+      </select>
+      <button class="btn primary" id="btn-save-settings">저장</button>
+    </section>
+
+  </main>
+
+  <div class="toast hidden" id="toast"></div>
+
+  <script src="questions.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
