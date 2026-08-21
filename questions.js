@@ -417,30 +417,70 @@ const ADVANCED_SETS = [
   },
 ];
 
-// 실전 모의고사 생성: 15문항
-function buildMockExam() {
+// 실전 모의고사 생성: 15문항, 난이도별 구성
+// difficulty: '3' (IM 목표) | '5' (IH 목표) | '6' (AL 목표)
+function buildMockExam(difficulty = '5') {
   const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
   const shuffled = (arr) => [...arr].sort(() => Math.random() - 0.5);
+  const isEasy = (q) => ['desc', 'routine', 'past'].includes(q.level);
+  const isHard = (q) => q.level === 'compare' || q.level === 'issue';
 
-  const [topicA, topicB] = shuffled(TOPICS).slice(0, 2);
+  const [topicA, topicB, topicC] = shuffled(TOPICS).slice(0, 3);
   const surprise = pick(SURPRISE_TOPICS);
   const rp = pick(ROLEPLAYS);
   const adv = pick(ADVANCED_SETS);
 
-  const pickSet = (topic, n) => {
-    const qs = shuffled(topic.questions).slice(0, n);
+  // 세트 뽑기: filter로 난이도 제한, ensureHard면 비교/이슈 문항 1개 이상 보장
+  const pickSet = (topic, n, filter, ensureHard) => {
+    const pool = filter ? topic.questions.filter(filter) : [...topic.questions];
+    let qs = shuffled(pool).slice(0, n);
+    if (ensureHard && !qs.some(isHard)) {
+      const hardLeft = pool.filter((q) => isHard(q) && !qs.includes(q));
+      if (hardLeft.length) qs[qs.length - 1] = pick(hardLeft);
+    }
     return qs.map((q) => ({ topic: `${topic.icon} ${topic.name}`, text: q.text }));
   };
 
-  return [
-    { topic: '👤 자기소개', text: SELF_INTRO.text },
-    ...pickSet(topicA, 3),
-    ...pickSet(topicB, 3),
-    ...pickSet(surprise, 3),
+  const roleplay = [
     { topic: `${rp.icon} 롤플레이 (질문하기)`, text: rp.q11 },
     { topic: `${rp.icon} 롤플레이 (문제해결)`, text: rp.q12 },
     { topic: `${rp.icon} 롤플레이 (관련경험)`, text: rp.q13 },
-    { topic: `🔥 고난도 (${adv.topic} 비교)`, text: adv.q14 },
-    { topic: `🔥 고난도 (${adv.topic} 이슈)`, text: adv.q15 },
-  ].map((q, i) => ({ ...q, number: i + 1 }));
+  ];
+
+  let exam;
+  if (difficulty === '3') {
+    // 3-3: 묘사/습관/경험만, 14-15번은 고난도 대신 세 번째 주제의 쉬운 문항 2개
+    exam = [
+      { topic: '👤 자기소개', text: SELF_INTRO.text },
+      ...pickSet(topicA, 3, isEasy),
+      ...pickSet(topicB, 3, isEasy),
+      ...pickSet(surprise, 3, isEasy),
+      ...roleplay,
+      ...pickSet(topicC, 2, isEasy),
+    ];
+  } else if (difficulty === '6') {
+    // 6-6: 각 세트에 비교/이슈 문항 1개 이상 보장 + 고난도 14-15번
+    exam = [
+      { topic: '👤 자기소개', text: SELF_INTRO.text },
+      ...pickSet(topicA, 3, null, true),
+      ...pickSet(topicB, 3, null, true),
+      ...pickSet(surprise, 3, null, true),
+      ...roleplay,
+      { topic: `🔥 고난도 (${adv.topic} 비교)`, text: adv.q14 },
+      { topic: `🔥 고난도 (${adv.topic} 이슈)`, text: adv.q15 },
+    ];
+  } else {
+    // 5-5: 이슈 문항은 제외하되 비교까지 포함 + 고난도 14-15번
+    const noIssue = (q) => q.level !== 'issue';
+    exam = [
+      { topic: '👤 자기소개', text: SELF_INTRO.text },
+      ...pickSet(topicA, 3, noIssue),
+      ...pickSet(topicB, 3, noIssue),
+      ...pickSet(surprise, 3, noIssue),
+      ...roleplay,
+      { topic: `🔥 고난도 (${adv.topic} 비교)`, text: adv.q14 },
+      { topic: `🔥 고난도 (${adv.topic} 이슈)`, text: adv.q15 },
+    ];
+  }
+  return exam.map((q, i) => ({ ...q, number: i + 1 }));
 }

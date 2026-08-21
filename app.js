@@ -1,6 +1,7 @@
 // ===== 상태 =====
 const state = {
   mode: null,            // 'practice' | 'mock'
+  difficulty: '5',       // 모의고사 난이도: '3' | '5' | '6'
   queue: [],             // 현재 질문 목록
   qIndex: 0,
   recording: false,
@@ -20,7 +21,13 @@ const state = {
 };
 
 const $ = (id) => document.getElementById(id);
-const views = ['home', 'practice', 'question', 'mock-result', 'script', 'history', 'settings'];
+const views = ['home', 'mock-setup', 'practice', 'question', 'mock-result', 'script', 'history', 'settings'];
+
+const DIFF_INFO = {
+  '3': { label: '3-3', target: 'IM', prompt: '3-3 (targeting IM). The exam contained only description, habit, and past-experience tasks plus role-plays — no comparison or issue questions. On a real OPIc taken at this level, ratings above IM3 are rarely awarded because advanced tasks are not tested; cap your rating accordingly and, if the student performed well, advise them to retake at a higher difficulty for IH+.' },
+  '5': { label: '5-5', target: 'IH', prompt: '5-5 (targeting IH). The exam included comparison tasks and two advanced questions (14-15). Rate normally across the full scale up to AL.' },
+  '6': { label: '6-6', target: 'AL', prompt: '6-6 (targeting AL). The exam was weighted toward comparison and issue tasks in every set plus two advanced questions. Hold the student to the highest standard: for AL, expect consistent paragraph-length speech, accurate past narration, and well-supported opinions on abstract issues.' },
+};
 
 function show(view) {
   views.forEach((v) => $(`view-${v}`).classList.toggle('hidden', v !== view));
@@ -309,7 +316,9 @@ async function nextQuestion() {
 function showSessionResult() {
   stopQuestionTimer();
   const isMock = state.mode === 'mock';
-  $('result-title').textContent = isMock ? '📊 모의고사 완료!' : '🎯 주제 연습 완료!';
+  $('result-title').textContent = isMock
+    ? `📊 모의고사 완료! (난이도 ${DIFF_INFO[state.difficulty]?.label || '5-5'})`
+    : '🎯 주제 연습 완료!';
   $('btn-overall-grade').textContent = isMock ? '🏆 종합 등급 예측 받기' : '🏆 주제 종합 피드백 받기';
   $('overall-grade-box').classList.add('hidden');
   $('overall-grade-content').innerHTML = '';
@@ -441,9 +450,12 @@ function buildMockEvalPrompt() {
     }
     return block;
   });
-  const intro = state.mode === 'mock'
+  let intro = state.mode === 'mock'
     ? "Here is the student's full mock OPIc exam:"
     : "Here is the student's topic practice session:";
+  if (state.mode === 'mock' && DIFF_INFO[state.difficulty]) {
+    intro = `[Exam difficulty] Self-assessment level ${DIFF_INFO[state.difficulty].prompt}\n\n${intro}`;
+  }
   return `${intro}\n\n${lines.join('\n\n')}`;
 }
 
@@ -626,7 +638,7 @@ function bind() {
     btn.onclick = () => {
       const nav = btn.dataset.nav;
       if (nav === 'mock') {
-        startPracticeSession('mock', buildMockExam());
+        show('mock-setup');
       } else if (nav === 'history') {
         renderHistory();
         show('history');
@@ -635,6 +647,14 @@ function bind() {
       }
     };
   });
+  document.querySelectorAll('[data-diff]').forEach((btn) => {
+    btn.onclick = () => {
+      state.difficulty = btn.dataset.diff;
+      localStorage.setItem('opic_difficulty', state.difficulty);
+      startPracticeSession('mock', buildMockExam(state.difficulty));
+    };
+  });
+  state.difficulty = localStorage.getItem('opic_difficulty') || '5';
   $('btn-save-settings').onclick = () => {
     settings.apiKey = $('api-key-input').value.trim();
     settings.timerSec = parseInt($('timer-select').value, 10);

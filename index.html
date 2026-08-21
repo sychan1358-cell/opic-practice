@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>OPIc 연습실</title>
-  <link rel="stylesheet" href="style.css?v=4" />
+  <link rel="stylesheet" href="style.css?v=5" />
 </head>
 <body>
   <header class="topbar">
@@ -40,6 +40,29 @@
         </button>
       </div>
       <div class="notice" id="mic-notice"></div>
+    </section>
+
+    <!-- 모의고사: 난이도 선택 -->
+    <section id="view-mock-setup" class="view hidden">
+      <h2>📝 난이도 선택</h2>
+      <p class="intro">실제 오픽의 자가평가처럼 난이도를 고르세요. 문항 구성이 달라집니다.</p>
+      <div class="menu-grid">
+        <button class="menu-card" data-diff="3">
+          <span class="menu-icon">🌱</span>
+          <span class="menu-title">3-3 · IM 목표</span>
+          <span class="menu-desc">묘사·습관·경험 위주 · 고난도 14-15번 없음</span>
+        </button>
+        <button class="menu-card" data-diff="5">
+          <span class="menu-icon">🔥</span>
+          <span class="menu-title">5-5 · IH 목표</span>
+          <span class="menu-desc">비교 문항 + 고난도 14-15번 포함</span>
+        </button>
+        <button class="menu-card" data-diff="6">
+          <span class="menu-icon">⚡</span>
+          <span class="menu-title">6-6 · AL 목표</span>
+          <span class="menu-desc">비교·이슈 비중 최대 · 가장 어려운 구성</span>
+        </button>
+      </div>
     </section>
 
     <!-- 주제별 연습: 주제 선택 -->
@@ -146,7 +169,7 @@
 
   <div class="toast hidden" id="toast"></div>
 
-  <script src="questions.js?v=4"></script>
-  <script src="app.js?v=4"></script>
+  <script src="questions.js?v=5"></script>
+  <script src="app.js?v=5"></script>
 </body>
 </html>
