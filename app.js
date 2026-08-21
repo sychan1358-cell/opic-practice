@@ -1,7 +1,10 @@
 // ===== 상태 =====
 const state = {
   mode: null,            // 'practice' | 'mock'
-  difficulty: '5',       // 모의고사 난이도: '3' | '5' | '6'
+  difficulty: '5',       // 모의고사 난이도 1~6
+  startDifficulty: '5',  // 시험 시작 시 난이도 (2차 자가평가로 변경될 수 있음)
+  secondAssessed: false, // 2차 자가평가 완료 여부
+  sessionId: null,       // 녹음 기록 세션 묶음용
   queue: [],             // 현재 질문 목록
   qIndex: 0,
   recording: false,
@@ -21,12 +24,15 @@ const state = {
 };
 
 const $ = (id) => document.getElementById(id);
-const views = ['home', 'mock-setup', 'practice', 'question', 'mock-result', 'script', 'history', 'settings'];
+const views = ['home', 'mock-setup', 'mock-adjust', 'practice', 'question', 'mock-result', 'script', 'history', 'settings'];
 
 const DIFF_INFO = {
-  '3': { label: '3-3', target: 'IM', prompt: '3-3 (targeting IM). The exam contained only description, habit, and past-experience tasks plus role-plays — no comparison or issue questions. On a real OPIc taken at this level, ratings above IM3 are rarely awarded because advanced tasks are not tested; cap your rating accordingly and, if the student performed well, advise them to retake at a higher difficulty for IH+.' },
-  '5': { label: '5-5', target: 'IH', prompt: '5-5 (targeting IH). The exam included comparison tasks and two advanced questions (14-15). Rate normally across the full scale up to AL.' },
-  '6': { label: '6-6', target: 'AL', prompt: '6-6 (targeting AL). The exam was weighted toward comparison and issue tasks in every set plus two advanced questions. Hold the student to the highest standard: for AL, expect consistent paragraph-length speech, accurate past narration, and well-supported opinions on abstract issues.' },
+  '1': { label: '1단계', prompt: 'Level 1 of 6 (lowest). Only short, simple description and habit tasks plus role-plays were tested — no past narration, comparison, or issue questions. On a real OPIc at this level, ratings above IL are rarely awarded because higher-level functions are never tested; cap your rating at IL and if the student performed well, strongly advise retaking at a higher level.' },
+  '2': { label: '2단계', prompt: 'Level 2 of 6. Description, habit, and past-experience tasks plus role-plays were tested — no comparison or issue questions. Ratings above IM1 are rarely awarded at this level; cap your rating at IM1 and advise a higher level if the student did well.' },
+  '3': { label: '3단계', prompt: 'Level 3 of 6. Description, habit, and past-experience tasks plus role-plays were tested — no comparison or issue questions. Ratings above IM3 are rarely awarded because advanced tasks are not tested; cap your rating at IM3 and advise level 5+ if the student performed strongly.' },
+  '4': { label: '4단계', prompt: 'Level 4 of 6. Comparison tasks were included but no abstract issue questions or advanced 14-15 set. Ratings up to IH are achievable; AL is rarely awarded at this level. If the student handled comparisons well, advise level 5-6 to attempt AL.' },
+  '5': { label: '5단계', prompt: 'Level 5 of 6 (targeting IH-AL). The exam included comparison tasks and two advanced questions (14-15). Rate normally across the full scale up to AL.' },
+  '6': { label: '6단계', prompt: 'Level 6 of 6 (targeting AL). The exam was weighted toward comparison and issue tasks in every set plus two advanced questions. Hold the student to the highest standard: for AL, expect consistent paragraph-length speech, accurate past narration, and well-supported opinions on abstract issues.' },
 };
 
 function show(view) {
@@ -53,6 +59,8 @@ const settings = {
   set apiKey(v) { localStorage.setItem('opic_api_key', v); },
   get timerSec() { return parseInt(localStorage.getItem('opic_timer') || '120', 10); },
   set timerSec(v) { localStorage.setItem('opic_timer', String(v)); },
+  get sttMode() { return localStorage.getItem('opic_stt_mode') || 'both'; },
+  set sttMode(v) { localStorage.setItem('opic_stt_mode', v); },
 };
 
 // ===== IndexedDB (녹음 저장) =====
@@ -68,10 +76,25 @@ function openDB() {
   });
 }
 
-function saveRecording(entry) {
+async function saveRecording(entry) {
   if (!db) return;
+  const e = { ...entry };
+  // 일부 모바일 브라우저는 Blob 저장이 불안정해서 ArrayBuffer로 변환해 저장
+  if (e.audio) {
+    try {
+      e.audioBuf = await e.audio.arrayBuffer();
+      e.audioType = e.audio.type || 'audio/webm';
+    } catch (_) {}
+    delete e.audio;
+  }
   const tx = db.transaction('recordings', 'readwrite');
-  tx.objectStore('recordings').add(entry);
+  tx.objectStore('recordings').add(e);
+}
+
+function recordingBlob(r) {
+  if (r.audio instanceof Blob) return r.audio; // 예전 형식 호환
+  if (r.audioBuf) return new Blob([r.audioBuf], { type: r.audioType || 'audio/webm' });
+  return null;
 }
 
 function getRecordings() {
@@ -128,6 +151,16 @@ function createRecognition() {
     const el = $('transcript');
     el.innerHTML = escapeHtml(state.finalTranscript) + (interim ? `<span class="interim">${escapeHtml(interim)}</span>` : '');
   };
+  rec.onerror = (e) => {
+    // no-speech/aborted는 재시작으로 회복되므로 무시, 나머지는 원인 안내
+    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+      toast('음성 인식 권한이 거부됐어요. 브라우저 설정에서 마이크를 허용해주세요.', 4000);
+    } else if (e.error === 'audio-capture') {
+      toast('음성 인식이 마이크를 사용할 수 없어요. 설정에서 "받아쓰기 전용" 모드를 켜보세요.', 4500);
+    } else if (e.error === 'network') {
+      toast('음성 인식 서버에 연결할 수 없어요 (인터넷 연결 확인).', 4000);
+    }
+  };
   rec.onend = () => {
     // 녹음 중이면 자동 재시작 (Chrome은 침묵 시 인식을 멈춤)
     if (state.recording) { try { rec.start(); } catch (_) {} }
@@ -141,47 +174,59 @@ function escapeHtml(s) {
 
 // ===== 녹음 =====
 async function startRecording() {
-  let stream;
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  } catch (err) {
-    return toast('마이크 권한이 필요합니다. 브라우저 설정에서 허용해주세요.');
-  }
+  const sttOnly = settings.sttMode === 'stt-only';
   state.audioChunks = [];
   state.audioBlob = null;
   state.finalTranscript = '';
   $('transcript').textContent = '';
   $('playback').classList.add('hidden');
 
-  const mr = new MediaRecorder(stream);
-  mr.ondataavailable = (e) => { if (e.data.size > 0) state.audioChunks.push(e.data); };
-  let resolveStop;
-  state.stopPromise = new Promise((r) => { resolveStop = r; });
-  mr.onstop = () => {
-    state.audioBlob = new Blob(state.audioChunks, { type: mr.mimeType || 'audio/webm' });
-    const url = URL.createObjectURL(state.audioBlob);
-    const player = $('playback');
-    player.src = url;
-    player.classList.remove('hidden');
-    stream.getTracks().forEach((t) => t.stop());
-    resolveStop();
-  };
-  mr.start();
-  state.mediaRecorder = mr;
+  // 음성 인식을 먼저 시작 (일부 안드로이드에서 녹음이 먼저면 인식이 마이크를 못 잡음)
+  state.recognition = createRecognition();
+  if (state.recognition) { try { state.recognition.start(); } catch (_) {} }
+  else if (sttOnly) return toast('이 브라우저는 음성 인식을 지원하지 않습니다 (Chrome/Edge 권장).');
+  else toast('이 브라우저는 음성 인식을 지원하지 않습니다 (Chrome/Edge 권장). 녹음만 진행됩니다.', 4000);
+
+  if (!sttOnly) {
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (err) {
+      if (state.recognition) { try { state.recognition.stop(); } catch (_) {} state.recognition = null; }
+      return toast('마이크 권한이 필요합니다. 브라우저 설정에서 허용해주세요.');
+    }
+    const mr = new MediaRecorder(stream);
+    mr.ondataavailable = (e) => { if (e.data.size > 0) state.audioChunks.push(e.data); };
+    let resolveStop;
+    state.stopPromise = new Promise((r) => { resolveStop = r; });
+    mr.onstop = () => {
+      state.audioBlob = new Blob(state.audioChunks, { type: mr.mimeType || 'audio/webm' });
+      const url = URL.createObjectURL(state.audioBlob);
+      const player = $('playback');
+      player.src = url;
+      player.classList.remove('hidden');
+      stream.getTracks().forEach((t) => t.stop());
+      resolveStop();
+    };
+    mr.start();
+    state.mediaRecorder = mr;
+  } else {
+    state.mediaRecorder = null;
+    state.stopPromise = Promise.resolve();
+  }
+
   state.recording = true;
   state.recStartTime = Date.now();
   $('btn-record').classList.add('recording');
-  $('rec-label').textContent = '녹음 중지';
+  $('rec-label').textContent = sttOnly ? '받아쓰기 중지' : '녹음 중지';
   state.recTimerId = setInterval(() => {
     $('rec-time').textContent = fmtTime((Date.now() - state.recStartTime) / 1000);
   }, 250);
-
-  state.recognition = createRecognition();
-  if (state.recognition) { try { state.recognition.start(); } catch (_) {} }
-  else toast('이 브라우저는 음성 인식을 지원하지 않습니다 (Chrome/Edge 권장). 녹음만 진행됩니다.', 4000);
 }
 
 function stopRecording() {
+  const wasRecording = state.recording;
+  const hadRecognition = !!state.recognition;
   if (state.recording && state.recStartTime) {
     state.recDuration = (Date.now() - state.recStartTime) / 1000;
   }
@@ -190,7 +235,11 @@ function stopRecording() {
   if (state.mediaRecorder && state.mediaRecorder.state !== 'inactive') state.mediaRecorder.stop();
   clearInterval(state.recTimerId);
   $('btn-record').classList.remove('recording');
-  $('rec-label').textContent = '녹음 시작';
+  $('rec-label').textContent = settings.sttMode === 'stt-only' ? '받아쓰기 시작' : '녹음 시작';
+  // 10초 이상 말했는데 받아쓰기가 비어 있으면 원인 안내
+  if (wasRecording && hadRecognition && state.recDuration >= 10 && !currentTranscript() && settings.sttMode === 'both') {
+    toast('받아쓰기가 인식되지 않았어요. 이 기기에서는 녹음과 동시 인식이 안 될 수 있으니, ⚙️ 설정에서 "받아쓰기 전용" 모드를 켜보세요.', 6000);
+  }
 }
 
 // 녹음이 완전히 끝나(blob 생성) 저장 가능할 때까지 대기
@@ -215,6 +264,9 @@ function startPracticeSession(mode, queue) {
   state.queue = queue;
   state.qIndex = 0;
   state.mockResults = [];
+  state.startDifficulty = state.difficulty;
+  state.secondAssessed = false;
+  state.sessionId = Date.now();
   show('question');
   renderQuestion();
 }
@@ -235,6 +287,7 @@ function renderQuestion() {
   state.finalTranscript = '';
   state.recDuration = 0;
   $('rec-time').textContent = '0:00';
+  $('rec-label').textContent = settings.sttMode === 'stt-only' ? '받아쓰기 시작' : '녹음 시작';
   $('playback').classList.add('hidden');
   $('feedback-box').classList.add('hidden');
   $('feedback-content').innerHTML = '';
@@ -285,6 +338,9 @@ function archiveCurrentAnswer() {
     const entry = {
       date: new Date().toISOString(),
       mode: state.mode,
+      sessionId: state.sessionId,
+      difficulty: state.mode === 'mock' ? state.difficulty : null,
+      number: q.number,
       topic: q.topic,
       question: q.text,
       transcript,
@@ -309,6 +365,27 @@ async function nextQuestion() {
     return;
   }
   state.qIndex++;
+  // 실제 오픽처럼 7문항 후 2차 자가평가 (남은 문항 난이도 조정)
+  if (state.mode === 'mock' && state.qIndex === 7 && !state.secondAssessed) {
+    stopQuestionTimer();
+    $('adjust-current').textContent = state.difficulty;
+    show('mock-adjust');
+    return;
+  }
+  renderQuestion();
+}
+
+function applyDifficultyAdjust(delta) {
+  state.secondAssessed = true;
+  const newDiff = String(Math.min(6, Math.max(1, parseInt(state.difficulty, 10) + delta)));
+  if (delta !== 0 && newDiff !== state.difficulty) {
+    state.difficulty = newDiff;
+    // 남은 문항(8~15번)을 새 난이도로 재생성
+    const fresh = buildMockExam(newDiff);
+    state.queue = [...state.queue.slice(0, 7), ...fresh.slice(7)];
+    toast(`난이도가 ${newDiff}단계로 변경됐어요`);
+  }
+  show('question');
   renderQuestion();
 }
 
@@ -454,7 +531,11 @@ function buildMockEvalPrompt() {
     ? "Here is the student's full mock OPIc exam:"
     : "Here is the student's topic practice session:";
   if (state.mode === 'mock' && DIFF_INFO[state.difficulty]) {
-    intro = `[Exam difficulty] Self-assessment level ${DIFF_INFO[state.difficulty].prompt}\n\n${intro}`;
+    let diffNote = `[Exam difficulty] Self-assessment level ${DIFF_INFO[state.difficulty].prompt}`;
+    if (state.startDifficulty !== state.difficulty) {
+      diffNote += ` (Note: the student started at level ${state.startDifficulty} and changed to level ${state.difficulty} at the mid-exam self-assessment; questions 8-15 follow the new level.)`;
+    }
+    intro = `${diffNote}\n\n${intro}`;
   }
   return `${intro}\n\n${lines.join('\n\n')}`;
 }
@@ -587,42 +668,63 @@ async function renderHistory() {
     list.innerHTML = '<div class="empty-msg">아직 녹음 기록이 없습니다.<br>연습을 시작해보세요!</div>';
     return;
   }
-  recs.forEach((r) => {
-    const div = document.createElement('div');
-    div.className = 'history-item';
-    const date = new Date(r.date);
+  // 세션(모의고사/연습 1회)별로 묶기
+  const groups = [];
+  for (const r of recs) {
+    const key = r.sessionId || `single-${r.id}`;
+    const last = groups[groups.length - 1];
+    if (last && last.key === key) last.items.push(r);
+    else groups.push({ key, items: [r] });
+  }
+  groups.forEach((g) => {
+    const first = g.items[0];
+    const date = new Date(first.date);
     const dateStr = `${date.getMonth() + 1}/${date.getDate()} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
-    div.innerHTML = `
-      <div class="h-meta">${dateStr} · ${r.mode === 'mock' ? '모의고사' : '주제연습'} · ${escapeHtml(r.topic || '')}${r.duration ? ` · 🎙️ ${fmtTime(r.duration)}` : ''}</div>
-      <div class="h-q">${escapeHtml(r.question || '')}</div>
-      ${r.transcript ? `<div class="r-answer">${escapeHtml(r.transcript)}</div>` : ''}
-    `;
-    if (r.audio) {
-      const audio = document.createElement('audio');
-      audio.controls = true;
-      audio.src = URL.createObjectURL(r.audio);
-      div.appendChild(audio);
-    }
-    const actions = document.createElement('div');
-    actions.className = 'h-actions';
-    if (r.transcript) {
-      const fbBtn = document.createElement('button');
-      fbBtn.className = 'btn primary';
-      fbBtn.textContent = '🤖 AI 피드백';
-      const fb = document.createElement('div');
-      fb.className = 'feedback-content';
-      fb.style.marginTop = '10px';
-      fbBtn.onclick = () => requestFeedback(r.question, r.transcript, fb, fbBtn, r.duration);
-      actions.appendChild(fbBtn);
-      div.appendChild(fb);
-    }
-    const delBtn = document.createElement('button');
-    delBtn.className = 'btn ghost';
-    delBtn.textContent = '🗑️ 삭제';
-    delBtn.onclick = () => { deleteRecording(r.id); div.remove(); };
-    actions.appendChild(delBtn);
-    div.appendChild(actions);
-    list.appendChild(div);
+    const modeLabel = first.mode === 'mock'
+      ? `📝 모의고사${first.difficulty ? ` (${first.difficulty}단계)` : ''}`
+      : '🎯 주제 연습';
+    const header = document.createElement('h3');
+    header.className = 'group-label';
+    header.textContent = `${modeLabel} · ${dateStr} · ${g.items.length}문항`;
+    list.appendChild(header);
+
+    // 세션 안에서는 문항 순서대로
+    [...g.items].sort((a, b) => (a.number || 0) - (b.number || 0)).forEach((r) => {
+      const div = document.createElement('div');
+      div.className = 'history-item';
+      div.innerHTML = `
+        <div class="h-meta">${r.number ? `Q${r.number} · ` : ''}${escapeHtml(r.topic || '')}${r.duration ? ` · 🎙️ ${fmtTime(r.duration)}` : ''}</div>
+        <div class="h-q">${escapeHtml(r.question || '')}</div>
+        ${r.transcript ? `<div class="r-answer">${escapeHtml(r.transcript)}</div>` : ''}
+      `;
+      const blob = recordingBlob(r);
+      if (blob) {
+        const audio = document.createElement('audio');
+        audio.controls = true;
+        audio.src = URL.createObjectURL(blob);
+        div.appendChild(audio);
+      }
+      const actions = document.createElement('div');
+      actions.className = 'h-actions';
+      if (r.transcript) {
+        const fbBtn = document.createElement('button');
+        fbBtn.className = 'btn primary';
+        fbBtn.textContent = '🤖 AI 피드백';
+        const fb = document.createElement('div');
+        fb.className = 'feedback-content';
+        fb.style.marginTop = '10px';
+        fbBtn.onclick = () => requestFeedback(r.question, r.transcript, fb, fbBtn, r.duration);
+        actions.appendChild(fbBtn);
+        div.appendChild(fb);
+      }
+      const delBtn = document.createElement('button');
+      delBtn.className = 'btn ghost';
+      delBtn.textContent = '🗑️ 삭제';
+      delBtn.onclick = () => { deleteRecording(r.id); div.remove(); };
+      actions.appendChild(delBtn);
+      div.appendChild(actions);
+      list.appendChild(div);
+    });
   });
 }
 
@@ -632,6 +734,7 @@ function bind() {
   $('btn-settings').onclick = () => {
     $('api-key-input').value = settings.apiKey;
     $('timer-select').value = String(settings.timerSec);
+    $('stt-mode-select').value = settings.sttMode;
     show('settings');
   };
   document.querySelectorAll('[data-nav]').forEach((btn) => {
@@ -654,10 +757,14 @@ function bind() {
       startPracticeSession('mock', buildMockExam(state.difficulty));
     };
   });
+  document.querySelectorAll('[data-adjust]').forEach((btn) => {
+    btn.onclick = () => applyDifficultyAdjust(parseInt(btn.dataset.adjust, 10));
+  });
   state.difficulty = localStorage.getItem('opic_difficulty') || '5';
   $('btn-save-settings').onclick = () => {
     settings.apiKey = $('api-key-input').value.trim();
     settings.timerSec = parseInt($('timer-select').value, 10);
+    settings.sttMode = $('stt-mode-select').value;
     toast('저장되었습니다 ✅');
     show('home');
   };
