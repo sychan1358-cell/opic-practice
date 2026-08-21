@@ -96,7 +96,12 @@
     <section id="view-mock-result" class="view hidden">
       <h2>📊 모의고사 완료!</h2>
       <p class="intro">각 문항의 녹음과 답변을 확인하고 AI 피드백을 받아보세요.</p>
-      <div id="mock-result-list"></div>
+      <button class="btn primary" id="btn-overall-grade">🏆 종합 등급 예측 받기</button>
+      <div class="feedback-box hidden" id="overall-grade-box" style="margin-bottom:18px">
+        <div class="feedback-label">🏆 종합 평가</div>
+        <div class="feedback-content" id="overall-grade-content"></div>
+      </div>
+      <div id="mock-result-list" style="margin-top:14px"></div>
       <button class="btn primary" id="btn-mock-home">홈으로</button>
     </section>
 

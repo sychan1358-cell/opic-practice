@@ -311,6 +311,9 @@ async function nextQuestion() {
 // ===== 모의고사 결과 =====
 function showMockResult() {
   stopQuestionTimer();
+  $('overall-grade-box').classList.add('hidden');
+  $('overall-grade-content').innerHTML = '';
+  $('btn-overall-grade').disabled = false;
   const list = $('mock-result-list');
   list.innerHTML = '';
   state.mockResults.forEach((r, i) => {
@@ -383,6 +386,45 @@ Respond in Korean with this Markdown structure:
 (IH~AL 수준으로 올리기 위해 추가할 수 있는 표현이나 구조 2-3가지 제안)
 
 All explanations in Korean, script in English.`;
+
+const MOCK_EVAL_SYSTEM = `You are an official OPIc (Oral Proficiency Interview - computer) rater. The student is Korean and aiming for IH (Intermediate High) to AL (Advanced Low). You are given a full 15-question mock OPIc exam: each question, the student's transcribed spoken answer, and speech stats where available (ignore punctuation/capitalization issues from transcription; a comfortable pace is roughly 110-150 words per minute).
+
+Rate holistically the way a real OPIc rater would: consistency across tasks matters more than one good answer. Description/habit questions test sustained paragraph-length speech; past-experience questions test narration in past tenses; role-plays test interactive functions (asking questions, resolving a problem); the final questions test comparison and supporting an opinion on an abstract issue. Unanswered questions should lower the rating.
+
+Respond in Korean with this Markdown structure:
+
+## 🏆 종합 예상 등급
+**(NL / NM / NH / IL / IM1 / IM2 / IM3 / IH / AL 중 하나)** — 한두 문장으로 핵심 근거. 등급이 경계선이면 "IM3~IH"처럼 범위로 표기.
+
+## 📋 영역별 평가
+- **묘사·습관 (선택/돌발 주제)**: 한두 줄 평가
+- **과거 경험 말하기**: 한두 줄 평가
+- **롤플레이 (11~13번)**: 한두 줄 평가
+- **비교·이슈 (14~15번)**: 한두 줄 평가
+- **유창성·전달력**: 속도, 답변 길이, 필러 사용 종합 평가
+
+## 📈 등급을 올리는 우선순위 3가지
+(현재 답변에서 드러난 약점 중 등급에 가장 큰 영향을 주는 순서로, 구체적인 연습 방법과 함께)
+
+## 💬 문항별 한줄평
+(답변한 문항만: "Q3: ..." 형태로 각 한 줄. 답변 안 한 문항은 묶어서 언급)
+
+All explanations in Korean, example English phrases in English.`;
+
+function buildMockEvalPrompt() {
+  const lines = state.mockResults.map((r) => {
+    let block = `[Q${r.number}] (${r.topic.replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, '').trim()})\n${r.text}\n`;
+    if (r.transcript) {
+      block += `Answer: ${r.transcript}`;
+      const stats = speechStats(r.transcript, r.duration);
+      if (stats) block += `\nStats:\n${stats}`;
+    } else {
+      block += 'Answer: (no answer given)';
+    }
+    return block;
+  });
+  return `Here is the student's full mock OPIc exam:\n\n${lines.join('\n\n')}`;
+}
 
 async function callClaude(system, userText, targetEl, onDone) {
   const key = settings.apiKey;
@@ -611,6 +653,15 @@ function bind() {
     callClaude(SCRIPT_SYSTEM, user, $('script-feedback-content'), () => { btn.disabled = false; });
   };
   $('btn-mock-home').onclick = () => show('home');
+  $('btn-overall-grade').onclick = () => {
+    const answered = state.mockResults.filter((r) => r.transcript).length;
+    if (answered === 0) return toast('답변한 문항이 없어 종합 평가를 할 수 없어요');
+    if (answered < 5) toast(`답변한 문항이 ${answered}개뿐이라 예측 정확도가 낮을 수 있어요`, 3500);
+    const btn = $('btn-overall-grade');
+    btn.disabled = true;
+    $('overall-grade-box').classList.remove('hidden');
+    callClaude(MOCK_EVAL_SYSTEM, buildMockEvalPrompt(), $('overall-grade-content'), () => { btn.disabled = false; });
+  };
 }
 
 // ===== 초기화 =====
