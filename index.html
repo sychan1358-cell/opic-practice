@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>OPIc 연습실</title>
-  <link rel="stylesheet" href="style.css?v=12" />
+  <link rel="stylesheet" href="style.css?v=13" />
 </head>
 <body>
   <header class="topbar">
@@ -47,6 +47,11 @@
           <span class="menu-icon">📚</span>
           <span class="menu-title">학습 자료</span>
           <span class="menu-desc">만능 문장 · 필러 · 연결어 · 고득점 어휘</span>
+        </button>
+        <button class="menu-card" data-nav="roleplay">
+          <span class="menu-icon">🎭</span>
+          <span class="menu-title">롤플레이 연습</span>
+          <span class="menu-desc">11~13번 유형만 집중 연습</span>
         </button>
       </div>
       <div class="notice" id="mic-notice"></div>
@@ -124,6 +129,15 @@
       <div class="topic-grid" id="topic-grid-roleplay"></div>
     </section>
 
+    <!-- 롤플레이 전용 연습 -->
+    <section id="view-roleplay" class="view hidden">
+      <h2>🎭 롤플레이 연습</h2>
+      <p class="intro">실제 시험의 11번(질문하기) → 12번(문제해결) → 13번(관련경험) 흐름 그대로 연습합니다.</p>
+      <button class="btn primary" id="btn-random-roleplay">🎲 랜덤 상황으로 연습</button>
+      <h3 class="group-label">상황 선택</h3>
+      <div class="topic-grid" id="roleplay-only-grid"></div>
+    </section>
+
     <!-- 질문 연습 화면 (주제별/모의고사 공용) -->
     <section id="view-question" class="view hidden">
       <div class="q-header">
@@ -184,7 +198,15 @@
       <input type="text" id="script-question" class="text-input" placeholder="예: Describe your favorite room in your home." />
       <label class="field-label">내 스크립트 (영어)</label>
       <textarea id="script-input" class="text-area" rows="10" placeholder="첨삭받을 영어 스크립트를 입력하세요..."></textarea>
-      <button class="btn primary" id="btn-correct">🤖 첨삭 받기</button>
+      <div class="q-bottom-actions">
+        <button class="btn primary" id="btn-correct">🤖 첨삭 받기</button>
+        <button class="btn" id="btn-script-listen">🔊 문장별 발음 듣기</button>
+      </div>
+      <div class="feedback-box hidden" id="script-sentences-box">
+        <div class="feedback-label">🔊 문장별 발음 (문장을 누르면 재생됩니다)</div>
+        <div id="script-sentences"></div>
+        <button class="btn" id="btn-script-play-all" style="margin-top:12px">▶️ 처음부터 전체 듣기</button>
+      </div>
       <div class="feedback-box hidden" id="script-feedback-box">
         <div class="feedback-label">🤖 첨삭 결과</div>
         <div class="feedback-content" id="script-feedback-content"></div>
@@ -255,6 +277,9 @@
         <option value="150">2분 30초</option>
         <option value="0">제한 없음</option>
       </select>
+      <label class="field-label">내 서베이 주제 (모의고사 선택주제 출제에 반영, 3개 이상 선택)</label>
+      <div class="topic-grid" id="survey-grid"></div>
+      <p class="hint">난이도 4단계 이상에서는 실제 오픽처럼 서베이에 없는 주제에서도 돌발 문제가 나올 수 있어요.</p>
       <label class="field-label">받아쓰기 모드</label>
       <select id="stt-mode-select" class="text-input">
         <option value="both" selected>녹음 + 자동 받아쓰기 (기본)</option>
@@ -268,8 +293,8 @@
 
   <div class="toast hidden" id="toast"></div>
 
-  <script src="questions.js?v=12"></script>
-  <script src="study.js?v=12"></script>
-  <script src="app.js?v=12"></script>
+  <script src="questions.js?v=13"></script>
+  <script src="study.js?v=13"></script>
+  <script src="app.js?v=13"></script>
 </body>
 </html>

@@ -24,7 +24,7 @@ const state = {
 };
 
 const $ = (id) => document.getElementById(id);
-const views = ['home', 'mock-setup', 'mock-adjust', 'practice', 'question', 'mock-result', 'script', 'history', 'settings', 'expr', 'expr-drill', 'study'];
+const views = ['home', 'mock-setup', 'mock-adjust', 'practice', 'question', 'mock-result', 'script', 'history', 'settings', 'expr', 'expr-drill', 'study', 'roleplay'];
 
 const DIFF_INFO = {
   '1': { label: '1단계', prompt: 'Level 1 of 6 (lowest). Only short, simple description and habit tasks plus role-plays were tested — no past narration, comparison, or issue questions. On a real OPIc at this level, ratings above IL are rarely awarded because higher-level functions are never tested; cap your rating at IL and if the student performed well, strongly advise retaking at a higher level.' },
@@ -61,6 +61,10 @@ const settings = {
   set timerSec(v) { localStorage.setItem('opic_timer', String(v)); },
   get sttMode() { return localStorage.getItem('opic_stt_mode') || 'both'; },
   set sttMode(v) { localStorage.setItem('opic_stt_mode', v); },
+  get surveyIds() {
+    try { return JSON.parse(localStorage.getItem('opic_survey')) || null; } catch (_) { return null; }
+  },
+  set surveyIds(v) { localStorage.setItem('opic_survey', JSON.stringify(v)); },
 };
 
 // ===== IndexedDB (녹음 저장) =====
@@ -198,7 +202,7 @@ if ('speechSynthesis' in window) {
   speechSynthesis.onvoiceschanged = loadVoices;
 }
 
-function speakQuestion(text) {
+function speakQuestion(text, onEnd) {
   if (!('speechSynthesis' in window)) return toast('이 브라우저는 음성 합성을 지원하지 않습니다');
   speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text);
@@ -207,6 +211,7 @@ function speakQuestion(text) {
   const preferred = voices.find((v) => v.lang === 'en-US' && /female|samantha|zira|aria|jenny/i.test(v.name))
     || voices.find((v) => v.lang === 'en-US') || voices[0];
   if (preferred) u.voice = preferred;
+  if (onEnd) u.onend = onEnd;
   speechSynthesis.speak(u);
 }
 
@@ -450,7 +455,7 @@ function applyDifficultyAdjust(delta) {
   if (delta !== 0 && newDiff !== state.difficulty) {
     state.difficulty = newDiff;
     // 남은 문항(8~15번)을 새 난이도로 재생성
-    const fresh = buildMockExam(newDiff);
+    const fresh = buildMockExam(newDiff, settings.surveyIds);
     state.queue = [...state.queue.slice(0, 7), ...fresh.slice(7)];
     toast(`난이도가 ${newDiff}단계로 변경됐어요`);
   }
@@ -754,14 +759,18 @@ function renderTopicGrids() {
     startPracticeSession('practice', queue);
   })));
   const rpGrid = $('topic-grid-roleplay');
-  ROLEPLAYS.forEach((rp) => rpGrid.appendChild(make(rp, () => {
-    const queue = [
-      { number: 1, topic: `${rp.icon} ${rp.name} · 11번 질문하기`, text: rp.q11 },
-      { number: 2, topic: `${rp.icon} ${rp.name} · 12번 문제해결`, text: rp.q12 },
-      { number: 3, topic: `${rp.icon} ${rp.name} · 13번 관련경험`, text: rp.q13 },
-    ];
-    startPracticeSession('practice', queue);
-  })));
+  ROLEPLAYS.forEach((rp) => rpGrid.appendChild(make(rp, () => startRoleplaySession(rp))));
+  const rpOnlyGrid = $('roleplay-only-grid');
+  ROLEPLAYS.forEach((rp) => rpOnlyGrid.appendChild(make(rp, () => startRoleplaySession(rp))));
+}
+
+function startRoleplaySession(rp) {
+  const queue = [
+    { number: 1, topic: `${rp.icon} ${rp.name} · 11번 질문하기`, text: rp.q11 },
+    { number: 2, topic: `${rp.icon} ${rp.name} · 12번 문제해결`, text: rp.q12 },
+    { number: 3, topic: `${rp.icon} ${rp.name} · 13번 관련경험`, text: rp.q13 },
+  ];
+  startPracticeSession('practice', queue);
 }
 
 // ===== 녹음 기록 =====
@@ -1008,6 +1017,56 @@ function renderStudy(sectionId) {
   });
 }
 
+// ===== 설정: 서베이 주제 선택 =====
+function renderSurveyGrid() {
+  const grid = $('survey-grid');
+  grid.innerHTML = '';
+  const selected = settings.surveyIds || TOPICS.map((t) => t.id);
+  TOPICS.forEach((t) => {
+    const btn = document.createElement('button');
+    btn.className = 'topic-card' + (selected.includes(t.id) ? ' checked' : '');
+    btn.dataset.topicId = t.id;
+    btn.innerHTML = `<span class="t-icon">${t.icon}</span><span>${t.name}</span>`;
+    btn.onclick = () => btn.classList.toggle('checked');
+    grid.appendChild(btn);
+  });
+}
+
+// ===== 스크립트 문장별 발음 듣기 =====
+const scriptPlay = { sentences: [], spans: [] };
+
+function splitSentences(text) {
+  return (text.match(/[^.!?\n]+[.!?]*/g) || []).map((s) => s.trim()).filter(Boolean);
+}
+
+function highlightSentence(idx) {
+  scriptPlay.spans.forEach((el, i) => el.classList.toggle('active', i === idx));
+}
+
+function renderScriptSentences() {
+  const script = $('script-input').value.trim();
+  if (!script) return toast('스크립트를 먼저 입력해주세요');
+  scriptPlay.sentences = splitSentences(script);
+  scriptPlay.spans = [];
+  const box = $('script-sentences');
+  box.innerHTML = '';
+  scriptPlay.sentences.forEach((s, i) => {
+    const div = document.createElement('div');
+    div.className = 'sent-item';
+    div.innerHTML = `<span class="s-num">${i + 1}</span><span class="s-text">${escapeHtml(s)}</span>`;
+    div.onclick = () => { highlightSentence(i); speakQuestion(s, () => highlightSentence(-1)); };
+    scriptPlay.spans.push(div);
+    box.appendChild(div);
+  });
+  $('script-sentences-box').classList.remove('hidden');
+}
+
+function playAllSentences(i = 0) {
+  if (i >= scriptPlay.sentences.length) return highlightSentence(-1);
+  highlightSentence(i);
+  speakQuestion(scriptPlay.sentences[i], () => playAllSentences(i + 1));
+}
+
 // ===== 이벤트 바인딩 =====
 function bind() {
   $('brand-home').onclick = () => { stopRecording(); stopQuestionTimer(); show('home'); };
@@ -1015,6 +1074,7 @@ function bind() {
     $('api-key-input').value = settings.apiKey;
     $('timer-select').value = String(settings.timerSec);
     $('stt-mode-select').value = settings.sttMode;
+    renderSurveyGrid();
     show('settings');
   };
   document.querySelectorAll('[data-nav]').forEach((btn) => {
@@ -1032,6 +1092,8 @@ function bind() {
       } else if (nav === 'study') {
         renderStudy();
         show('study');
+      } else if (nav === 'roleplay') {
+        show('roleplay');
       } else {
         show(nav);
       }
@@ -1041,7 +1103,7 @@ function bind() {
     btn.onclick = () => {
       state.difficulty = btn.dataset.diff;
       localStorage.setItem('opic_difficulty', state.difficulty);
-      startPracticeSession('mock', buildMockExam(state.difficulty));
+      startPracticeSession('mock', buildMockExam(state.difficulty, settings.surveyIds));
     };
   });
   document.querySelectorAll('[data-adjust]').forEach((btn) => {
@@ -1049,6 +1111,11 @@ function bind() {
   });
   state.difficulty = localStorage.getItem('opic_difficulty') || '5';
   $('btn-save-settings').onclick = () => {
+    const checked = [...document.querySelectorAll('#survey-grid .topic-card.checked')].map((b) => b.dataset.topicId);
+    if (checked.length > 0 && checked.length < 3) {
+      return toast('서베이 주제는 3개 이상 선택해주세요 (실제 오픽처럼 두 주제 + 예비가 필요해요)');
+    }
+    if (checked.length > 0) settings.surveyIds = checked;
     settings.apiKey = $('api-key-input').value.trim();
     settings.timerSec = parseInt($('timer-select').value, 10);
     settings.sttMode = $('stt-mode-select').value;
@@ -1076,6 +1143,14 @@ function bind() {
       renderHistory(btn.dataset.hfilter);
     };
   });
+  $('btn-random-roleplay').onclick = () => {
+    startRoleplaySession(ROLEPLAYS[Math.floor(Math.random() * ROLEPLAYS.length)]);
+  };
+  $('btn-script-listen').onclick = renderScriptSentences;
+  $('btn-script-play-all').onclick = () => {
+    if (!scriptPlay.sentences.length) return;
+    playAllSentences(0);
+  };
   $('script-grade').value = localStorage.getItem('opic_script_grade') || 'IH';
   $('btn-correct').onclick = () => {
     const script = $('script-input').value.trim();

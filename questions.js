@@ -143,6 +143,22 @@ const TOPICS = [
     ],
   },
   {
+    id: 'concert',
+    name: '공연 보기',
+    icon: '🎤',
+    questions: [
+      { level: 'desc', text: 'You indicated in the survey that you like going to performances or concerts. What kind of performances do you like to watch, and why do you like them?' },
+      { level: 'desc', text: 'Tell me about a concert hall or performance venue you often go to. Where is it, and what does it look like inside?' },
+      { level: 'routine', text: 'What do you usually do before and after watching a performance? Who do you usually go with? Tell me about a typical day when you go to a concert.' },
+      { level: 'routine', text: 'How do you usually find out about performances and get tickets? Walk me through the whole process.' },
+      { level: 'past', text: 'Tell me about the most memorable performance or concert you have ever seen. Who performed, and what made it so special?' },
+      { level: 'past', text: 'Tell me about the first performance you ever saw. When was it, who were you with, and what do you remember about it?' },
+      { level: 'past', text: 'Have you ever had something unexpected happen at a performance — like a delay, bad seats, or losing your ticket? Tell me the whole story.' },
+      { level: 'compare', text: 'Compare concerts or performances today with those you watched in the past. How have they changed in terms of stage, technology, and audience culture?' },
+      { level: 'issue', text: 'Ticket prices for popular concerts have become very expensive, and getting tickets is harder than ever. Why has this happened, and what do people think about this issue?' },
+    ],
+  },
+  {
     id: 'shopping',
     name: '쇼핑',
     icon: '🛍️',
@@ -427,7 +443,8 @@ function difficultyFilter(level) {
   return null; // 6: 전체 허용
 }
 
-function buildMockExam(difficulty = '5') {
+// surveyIds: 사용자가 서베이에서 고른 주제 id 배열 (없으면 전체 주제 사용)
+function buildMockExam(difficulty = '5', surveyIds = null) {
   const L = Math.min(6, Math.max(1, parseInt(difficulty, 10) || 5));
   const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
   const shuffled = (arr) => [...arr].sort(() => Math.random() - 0.5);
@@ -435,8 +452,15 @@ function buildMockExam(difficulty = '5') {
   const filter = difficultyFilter(L);
   const ensureHard = L >= 6;
 
-  const [topicA, topicB, topicC] = shuffled(TOPICS).slice(0, 3);
-  const surprise = pick(SURPRISE_TOPICS);
+  // 선택주제는 내 서베이 주제에서만 출제 (3개 미만이면 다른 주제로 보충)
+  let surveyed = (surveyIds && surveyIds.length) ? TOPICS.filter((t) => surveyIds.includes(t.id)) : [...TOPICS];
+  const nonSurveyed = TOPICS.filter((t) => !surveyed.includes(t));
+  if (surveyed.length < 3) surveyed = surveyed.concat(shuffled(nonSurveyed).slice(0, 3 - surveyed.length));
+
+  const [topicA, topicB, topicC] = shuffled(surveyed).slice(0, 3);
+  // 돌발: 난이도 4 이상이면 서베이에 없는 선택주제에서도 돌발 출제 (실제 오픽처럼)
+  const surprisePool = L >= 4 ? [...SURPRISE_TOPICS, ...nonSurveyed] : SURPRISE_TOPICS;
+  const surprise = pick(surprisePool);
   const rp = pick(ROLEPLAYS);
   const adv = pick(ADVANCED_SETS);
 

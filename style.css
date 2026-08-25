@@ -202,3 +202,18 @@ audio { width: 100%; margin-top: 14px; }
   padding: 12px 20px; border-radius: 12px; font-size: 14px; z-index: 100;
   box-shadow: 0 8px 30px rgba(0,0,0,.4);
 }
+
+/* 서베이 주제 선택 */
+.topic-card.checked { border-color: var(--accent); background: rgba(108,123,255,.14); }
+
+/* 스크립트 문장별 발음 */
+.sent-item {
+  display: flex; gap: 10px; align-items: flex-start; cursor: pointer;
+  padding: 9px 6px; border-bottom: 1px solid var(--border);
+}
+.sent-item:last-child { border-bottom: none; }
+.sent-item:hover { background: rgba(108,123,255,.08); }
+.sent-item .s-num { color: var(--muted); font-size: 12px; min-width: 18px; padding-top: 2px; }
+.sent-item .s-text { line-height: 1.6; }
+.sent-item.active { background: rgba(108,123,255,.14); }
+.sent-item.active .s-text { color: var(--accent); font-weight: 600; }
