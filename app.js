@@ -227,7 +227,8 @@ function getWhisper(onStatus) {
   if (!whisperLoading) {
     whisperLoading = (async () => {
       if (onStatus) onStatus('🤖 AI 받아쓰기 모듈 로딩 중...');
-      const { pipeline } = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/dist/transformers.min.js');
+      const { pipeline, env } = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/dist/transformers.min.js');
+      env.allowLocalModels = false; // 모델은 항상 원격(HuggingFace)에서 받고 브라우저 캐시에 저장
       const seen = {};
       const pipe = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny.en', {
         progress_callback: (p) => {
