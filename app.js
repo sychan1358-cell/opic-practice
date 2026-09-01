@@ -18,6 +18,7 @@ const state = {
   recognition: null,
   sttActive: false,
   lastSttError: null,
+  whisperPromise: null,
   finalTranscript: '',
   qTimerId: null,
   qTimeLeft: 0,
@@ -217,6 +218,62 @@ function speakQuestion(text, onEnd) {
   speechSynthesis.speak(u);
 }
 
+// ===== Whisper AI 받아쓰기 (브라우저 내 실행, 무료) =====
+let whisperPipeline = null;
+let whisperLoading = null;
+
+function getWhisper(onStatus) {
+  if (whisperPipeline) return Promise.resolve(whisperPipeline);
+  if (!whisperLoading) {
+    whisperLoading = (async () => {
+      if (onStatus) onStatus('🤖 AI 받아쓰기 모듈 로딩 중...');
+      const { pipeline } = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/dist/transformers.min.js');
+      const seen = {};
+      const pipe = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny.en', {
+        progress_callback: (p) => {
+          if (p.status === 'progress' && p.file && onStatus) {
+            seen[p.file] = p.progress || 0;
+            const files = Object.values(seen);
+            const avg = Math.round(files.reduce((a, b) => a + b, 0) / files.length);
+            onStatus(`🤖 AI 모델 다운로드 중 ${avg}% (첫 사용 시 한 번만)`);
+          }
+        },
+      });
+      whisperPipeline = pipe;
+      return pipe;
+    })();
+    whisperLoading.catch(() => { whisperLoading = null; });
+  }
+  return whisperLoading;
+}
+
+// 녹음 blob → 16kHz 모노 PCM
+async function blobToPCM(blob) {
+  const arrayBuf = await blob.arrayBuffer();
+  const AC = window.AudioContext || window.webkitAudioContext;
+  const ac = new AC();
+  const audio = await ac.decodeAudioData(arrayBuf);
+  ac.close();
+  if (audio.sampleRate === 16000 && audio.numberOfChannels === 1) {
+    return audio.getChannelData(0);
+  }
+  const off = new OfflineAudioContext(1, Math.ceil(audio.duration * 16000), 16000);
+  const src = off.createBufferSource();
+  src.buffer = audio;
+  src.connect(off.destination);
+  src.start();
+  const rendered = await off.startRendering();
+  return rendered.getChannelData(0);
+}
+
+async function transcribeBlob(blob, onStatus) {
+  const pipe = await getWhisper(onStatus);
+  if (onStatus) onStatus('🤖 AI 받아쓰기 중... (답변 길이에 따라 시간이 걸려요)');
+  const pcm = await blobToPCM(blob);
+  const out = await pipe(pcm, { chunk_length_s: 30, stride_length_s: 5 });
+  return (out.text || '').trim();
+}
+
 // ===== 음성 인식 =====
 function setSttStatus(text, isError) {
   const el = $('stt-status');
@@ -285,14 +342,22 @@ async function startRecording() {
   state.audioBlob = null;
   state.finalTranscript = '';
   $('transcript').textContent = '';
-  state.sttActive = true;
+  const useWhisper = settings.sttMode === 'whisper';
+  state.sttActive = !useWhisper;
   state.lastSttError = null;
+  state.whisperPromise = null;
 
-  // 음성 인식을 먼저 시작 (일부 안드로이드에서 녹음이 먼저면 인식이 마이크를 못 잡음)
-  state.recognition = createRecognition();
-  if (state.recognition) { try { state.recognition.start(); } catch (_) {} }
-  else if (sttOnly) return toast('이 브라우저는 음성 인식을 지원하지 않습니다 (Chrome/Edge 권장).');
-  else toast('이 브라우저는 음성 인식을 지원하지 않습니다 (Chrome/Edge 권장). 녹음만 진행됩니다.', 4000);
+  if (useWhisper) {
+    // Whisper 모드: 실시간 인식 없이 녹음만, 끝나면 AI가 받아쓰기
+    state.recognition = null;
+    setSttStatus('🎙️ 녹음 중 — 끝나면 AI가 받아써줘요');
+  } else {
+    // 음성 인식을 먼저 시작 (일부 안드로이드에서 녹음이 먼저면 인식이 마이크를 못 잡음)
+    state.recognition = createRecognition();
+    if (state.recognition) { try { state.recognition.start(); } catch (_) {} }
+    else if (sttOnly) return toast('이 브라우저는 음성 인식을 지원하지 않습니다. 설정에서 "AI 받아쓰기 (Whisper)" 모드를 사용해보세요.', 4500);
+    else toast('이 브라우저는 실시간 음성 인식을 지원하지 않아요. 설정에서 "AI 받아쓰기 (Whisper)" 모드를 켜면 받아쓰기가 됩니다.', 4500);
+  }
 
   if (!sttOnly) {
     let stream;
@@ -336,10 +401,29 @@ function stopRecording() {
   }
   state.recording = false;
   state.sttActive = false;
-  setSttStatus('');
+  if (settings.sttMode !== 'whisper') setSttStatus('');
   if (state.recognition) { try { state.recognition.stop(); } catch (_) {} state.recognition = null; }
   if (state.mediaRecorder && state.mediaRecorder.state !== 'inactive') state.mediaRecorder.stop();
   clearInterval(state.recTimerId);
+  // Whisper 모드: 녹음 완료 후 AI 받아쓰기 실행
+  if (settings.sttMode === 'whisper' && wasRecording) {
+    state.whisperPromise = (async () => {
+      await (state.stopPromise || Promise.resolve());
+      if (!state.audioBlob) return;
+      try {
+        const text = await transcribeBlob(state.audioBlob, setSttStatus);
+        if (text) {
+          state.finalTranscript = text + ' ';
+          $('transcript').textContent = text;
+          setSttStatus('✅ AI 받아쓰기 완료');
+        } else {
+          setSttStatus('⚠️ 음성을 인식하지 못했어요. 답변 칸에 직접 입력할 수 있어요.', true);
+        }
+      } catch (e) {
+        setSttStatus('⚠️ AI 받아쓰기 실패 — 인터넷 연결을 확인해주세요', true);
+      }
+    })();
+  }
   $('btn-record').classList.remove('recording');
   $('rec-label').textContent = settings.sttMode === 'stt-only' ? '받아쓰기 시작' : '녹음 시작';
   // 10초 이상 말했는데 받아쓰기가 비어 있으면 원인 안내
@@ -348,10 +432,14 @@ function stopRecording() {
   }
 }
 
-// 녹음이 완전히 끝나(blob 생성) 저장 가능할 때까지 대기
-function stopAndWait() {
+// 녹음이 완전히 끝나(blob 생성, AI 받아쓰기까지) 저장 가능할 때까지 대기
+async function stopAndWait() {
   if (state.recording) stopRecording();
-  return state.stopPromise || Promise.resolve();
+  await (state.stopPromise || Promise.resolve());
+  if (state.whisperPromise) {
+    toast('🤖 AI 받아쓰기가 끝날 때까지 잠시 기다려주세요...', 3000);
+    await state.whisperPromise;
+  }
 }
 
 // 말하기 통계: 발화 속도, 필러 단어 등 (AI 유창성 피드백용)
@@ -394,6 +482,7 @@ function renderQuestion() {
   state.recDuration = 0;
   $('rec-time').textContent = '0:00';
   $('rec-label').textContent = settings.sttMode === 'stt-only' ? '받아쓰기 시작' : '녹음 시작';
+  setSttStatus('');
   $('btn-next-q').textContent = state.qIndex + 1 >= state.queue.length
     ? (state.mode === 'mock' ? '시험 종료 →' : '완료')
     : '다음 문항 →';
@@ -463,6 +552,7 @@ async function nextQuestion() {
   state.audioBlob = null;
   state.recDuration = 0;
   state.stopPromise = null;
+  state.whisperPromise = null;
   if (state.qIndex + 1 >= state.queue.length) {
     showSessionResult();
     return;
@@ -888,6 +978,29 @@ async function renderHistory(filter = 'all') {
         };
         actions.appendChild(fbBtn);
       }
+      if (!r.transcript && blob) {
+        const sttBtn = document.createElement('button');
+        sttBtn.className = 'btn';
+        sttBtn.textContent = '🤖 AI 받아쓰기';
+        sttBtn.onclick = async () => {
+          sttBtn.disabled = true;
+          try {
+            const text = await transcribeBlob(blob, (s) => { sttBtn.textContent = s; });
+            if (text) {
+              updateRecording(r.id, { transcript: text });
+              toast('받아쓰기 완료! 이제 AI 피드백도 받을 수 있어요');
+              const active = document.querySelector('[data-hfilter].active');
+              renderHistory(active ? active.dataset.hfilter : 'all');
+            } else {
+              sttBtn.textContent = '⚠️ 음성 인식 실패';
+            }
+          } catch (e) {
+            sttBtn.textContent = '⚠️ 실패 — 다시 시도';
+            sttBtn.disabled = false;
+          }
+        };
+        actions.appendChild(sttBtn);
+      }
       const delBtn = document.createElement('button');
       delBtn.className = 'btn ghost';
       delBtn.textContent = '🗑️ 삭제';
@@ -1190,6 +1303,11 @@ function bind() {
     settings.timerSec = parseInt($('timer-select').value, 10);
     settings.sttMode = $('stt-mode-select').value;
     toast('저장되었습니다 ✅');
+    // Whisper 모드 선택 시 모델을 미리 다운로드 (첫 녹음 때 기다리지 않도록)
+    if (settings.sttMode === 'whisper' && !whisperPipeline) {
+      toast('🤖 AI 받아쓰기 모델을 미리 받아둘게요 (약 40MB, 한 번만)', 4000);
+      getWhisper(() => {}).then(() => toast('✅ AI 받아쓰기 준비 완료!')).catch(() => {});
+    }
     show('home');
   };
   $('btn-listen').onclick = () => speakQuestion(state.queue[state.qIndex].text);
