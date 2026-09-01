@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>OPIc 연습실</title>
-  <link rel="stylesheet" href="style.css?v=13" />
+  <link rel="stylesheet" href="style.css?v=14" />
 </head>
 <body>
   <header class="topbar">
@@ -157,6 +157,7 @@
         <button class="record-btn" id="btn-record"><span class="rec-dot"></span><span id="rec-label">녹음 시작</span></button>
         <div class="rec-time" id="rec-time">0:00</div>
       </div>
+      <div class="stt-status" id="stt-status"></div>
 
       <div class="transcript-box" id="transcript-box">
         <div class="transcript-label">📝 내 답변 (자동 인식)</div>
@@ -286,6 +287,12 @@
         <option value="stt-only">받아쓰기 전용 (녹음 안 함, 모바일에서 인식 안 될 때)</option>
       </select>
       <p class="hint">일부 안드로이드 폰에서는 녹음과 음성인식을 동시에 못 해서 받아쓰기가 비어 있을 수 있어요.<br>그럴 땐 "받아쓰기 전용"으로 바꾸면 인식이 잘 됩니다 (대신 녹음 파일은 저장되지 않아요).</p>
+      <label class="field-label">음성인식 진단</label>
+      <button class="btn" id="btn-stt-test">🩺 음성인식 테스트 (7초간 영어로 말해보세요)</button>
+      <div class="feedback-box hidden" id="stt-test-box" style="margin-top:10px">
+        <div class="feedback-label">진단 결과</div>
+        <div id="stt-test-log" style="font-size:14px; line-height:1.7; white-space:pre-wrap"></div>
+      </div>
       <button class="btn primary" id="btn-save-settings">저장</button>
     </section>
 
@@ -293,8 +300,8 @@
 
   <div class="toast hidden" id="toast"></div>
 
-  <script src="questions.js?v=13"></script>
-  <script src="study.js?v=13"></script>
-  <script src="app.js?v=13"></script>
+  <script src="questions.js?v=14"></script>
+  <script src="study.js?v=14"></script>
+  <script src="app.js?v=14"></script>
 </body>
 </html>

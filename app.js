@@ -16,6 +16,8 @@ const state = {
   recStartTime: null,
   recTimerId: null,
   recognition: null,
+  sttActive: false,
+  lastSttError: null,
   finalTranscript: '',
   qTimerId: null,
   qTimeLeft: 0,
@@ -216,6 +218,13 @@ function speakQuestion(text, onEnd) {
 }
 
 // ===== 음성 인식 =====
+function setSttStatus(text, isError) {
+  const el = $('stt-status');
+  if (!el) return;
+  el.textContent = text;
+  el.classList.toggle('error', !!isError);
+}
+
 function createRecognition() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) return null;
@@ -223,6 +232,7 @@ function createRecognition() {
   rec.lang = 'en-US';
   rec.continuous = true;
   rec.interimResults = true;
+  rec.onstart = () => setSttStatus('🎤 인식 중...');
   rec.onresult = (e) => {
     let interim = '';
     for (let i = e.resultIndex; i < e.results.length; i++) {
@@ -232,20 +242,34 @@ function createRecognition() {
     }
     const el = $('transcript');
     el.innerHTML = escapeHtml(state.finalTranscript) + (interim ? `<span class="interim">${escapeHtml(interim)}</span>` : '');
+    setSttStatus('🎤 인식 중 ✓');
   };
   rec.onerror = (e) => {
+    state.lastSttError = e.error;
     // no-speech/aborted는 재시작으로 회복되므로 무시, 나머지는 원인 안내
     if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+      setSttStatus('⚠️ 마이크 권한 거부됨', true);
       toast('음성 인식 권한이 거부됐어요. 브라우저 설정에서 마이크를 허용해주세요.', 4000);
     } else if (e.error === 'audio-capture') {
+      setSttStatus('⚠️ 마이크 사용 불가', true);
       toast('음성 인식이 마이크를 사용할 수 없어요. 설정에서 "받아쓰기 전용" 모드를 켜보세요.', 4500);
     } else if (e.error === 'network') {
+      setSttStatus('⚠️ 네트워크 오류', true);
       toast('음성 인식 서버에 연결할 수 없어요 (인터넷 연결 확인).', 4000);
+    } else if (e.error === 'language-not-supported') {
+      setSttStatus('⚠️ 영어 인식 미지원 기기', true);
+      toast('이 기기의 음성인식이 영어를 지원하지 않아요. 폰 설정에서 Google 음성인식 영어 팩을 설치해보세요.', 5000);
     }
   };
   rec.onend = () => {
-    // 녹음 중이면 자동 재시작 (Chrome은 침묵 시 인식을 멈춤)
-    if (state.recording) { try { rec.start(); } catch (_) {} }
+    // 인식이 켜져 있어야 하는 동안 끊기면 자동 재시작 (Chrome은 침묵/마이크 경합 시 인식을 멈춤)
+    if (state.sttActive) {
+      setTimeout(() => {
+        if (state.sttActive && state.recognition === rec) { try { rec.start(); } catch (_) {} }
+      }, 250);
+    } else {
+      setSttStatus('');
+    }
   };
   return rec;
 }
@@ -261,6 +285,8 @@ async function startRecording() {
   state.audioBlob = null;
   state.finalTranscript = '';
   $('transcript').textContent = '';
+  state.sttActive = true;
+  state.lastSttError = null;
 
   // 음성 인식을 먼저 시작 (일부 안드로이드에서 녹음이 먼저면 인식이 마이크를 못 잡음)
   state.recognition = createRecognition();
@@ -273,6 +299,7 @@ async function startRecording() {
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch (err) {
+      state.sttActive = false;
       if (state.recognition) { try { state.recognition.stop(); } catch (_) {} state.recognition = null; }
       return toast('마이크 권한이 필요합니다. 브라우저 설정에서 허용해주세요.');
     }
@@ -308,6 +335,8 @@ function stopRecording() {
     state.recDuration = (Date.now() - state.recStartTime) / 1000;
   }
   state.recording = false;
+  state.sttActive = false;
+  setSttStatus('');
   if (state.recognition) { try { state.recognition.stop(); } catch (_) {} state.recognition = null; }
   if (state.mediaRecorder && state.mediaRecorder.state !== 'inactive') state.mediaRecorder.stop();
   clearInterval(state.recTimerId);
@@ -1067,6 +1096,47 @@ function playAllSentences(i = 0) {
   speakQuestion(scriptPlay.sentences[i], () => playAllSentences(i + 1));
 }
 
+// ===== 음성인식 진단 =====
+function runSttTest() {
+  const box = $('stt-test-box');
+  const log = $('stt-test-log');
+  box.classList.remove('hidden');
+  const lines = [];
+  const add = (s) => { lines.push(s); log.textContent = lines.join('\n'); };
+  log.textContent = '';
+
+  add(`브라우저: ${navigator.userAgent.includes('SamsungBrowser') ? '삼성 인터넷 ⚠️' : navigator.userAgent.includes('Chrome') ? 'Chrome 계열' : '기타'}`);
+  add(`보안 컨텍스트(HTTPS): ${window.isSecureContext ? '✅' : '❌ (음성인식 불가 원인)'}`);
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) return add('❌ 이 브라우저에는 음성인식 API가 아예 없습니다. Chrome 앱으로 직접 열어주세요.');
+  add('✅ 음성인식 API 존재');
+
+  const rec = new SR();
+  rec.lang = 'en-US';
+  rec.continuous = true;
+  rec.interimResults = true;
+  let gotAudio = false, gotSpeech = false, gotResult = false, ended = false;
+  rec.onstart = () => add('✅ 인식 시작됨 — 지금 영어로 말해보세요!');
+  rec.onaudiostart = () => { gotAudio = true; add('✅ 마이크 소리 입력 감지'); };
+  rec.onspeechstart = () => { gotSpeech = true; add('✅ 말소리 감지'); };
+  rec.onresult = (e) => {
+    gotResult = true;
+    const last = e.results[e.results.length - 1];
+    add(`✅ 인식됨: "${last[0].transcript.trim()}"`);
+  };
+  rec.onerror = (e) => add(`❌ 오류 발생: ${e.error}`);
+  rec.onend = () => { if (!ended) { ended = true; finish(); } };
+  const finish = () => {
+    try { rec.stop(); } catch (_) {}
+    add('--- 진단 종료 ---');
+    if (gotResult) add('🎉 음성인식이 정상 동작합니다! 문제가 계속되면 이 진단 결과를 알려주세요.');
+    else if (gotSpeech || gotAudio) add('⚠️ 소리는 들어오는데 텍스트 변환이 안 됩니다. 폰의 Google 음성인식에 영어(미국) 언어팩이 없을 가능성이 큽니다.\n→ 폰 설정 > 시스템 > 언어 및 입력 > 음성인식 (또는 Google 앱 > 설정 > 음성) 에서 English (US) 오프라인 팩을 설치해보세요.');
+    else add('⚠️ 마이크 입력 자체가 감지되지 않았습니다. 사이트 마이크 권한과 폰 마이크를 확인해주세요.');
+  };
+  try { rec.start(); } catch (e) { add(`❌ 시작 실패: ${e.message}`); return; }
+  setTimeout(() => { if (!ended) { ended = true; finish(); } }, 7000);
+}
+
 // ===== 이벤트 바인딩 =====
 function bind() {
   $('brand-home').onclick = () => { stopRecording(); stopQuestionTimer(); show('home'); };
@@ -1143,6 +1213,7 @@ function bind() {
       renderHistory(btn.dataset.hfilter);
     };
   });
+  $('btn-stt-test').onclick = runSttTest;
   $('btn-random-roleplay').onclick = () => {
     startRoleplaySession(ROLEPLAYS[Math.floor(Math.random() * ROLEPLAYS.length)]);
   };

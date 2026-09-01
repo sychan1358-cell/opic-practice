@@ -217,3 +217,7 @@ audio { width: 100%; margin-top: 14px; }
 .sent-item .s-text { line-height: 1.6; }
 .sent-item.active { background: rgba(108,123,255,.14); }
 .sent-item.active .s-text { color: var(--accent); font-weight: 600; }
+
+/* 음성인식 상태 표시 */
+.stt-status { text-align: center; font-size: 13px; color: var(--muted); min-height: 18px; margin-bottom: 6px; }
+.stt-status.error { color: var(--danger); }
