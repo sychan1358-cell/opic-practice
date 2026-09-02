@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>OPIc 연습실</title>
-  <link rel="stylesheet" href="style.css?v=17" />
+  <link rel="stylesheet" href="style.css?v=18" />
 </head>
 <body>
   <header class="topbar">
@@ -287,7 +287,7 @@
         <option value="whisper">녹음 + AI 받아쓰기 (Whisper) — 실시간 인식이 안 되는 기기용, 모든 기기 지원</option>
         <option value="stt-only">실시간 받아쓰기 전용 (녹음 안 함)</option>
       </select>
-      <p class="hint">실시간 받아쓰기가 안 되는 폰이라면 <b>"AI 받아쓰기 (Whisper)"</b>를 선택하세요.<br>녹음이 끝나면 브라우저 안의 AI 모델이 무료로 받아써줍니다 (첫 사용 시 모델 약 40MB 다운로드, 이후엔 저장돼서 바로 사용).</p>
+      <p class="hint">기본 모드에서도 실시간 받아쓰기가 비어 있으면 <b>자동으로 AI 받아쓰기(Whisper)</b>로 전환됩니다.<br>실시간 인식이 계속 안 되는 폰이라면 "AI 받아쓰기" 모드를 고르면 처음부터 AI가 받아씁니다 (첫 사용 시 모델 약 40MB 다운로드, 이후엔 저장돼서 바로 사용).</p>
       <label class="field-label">음성인식 진단</label>
       <button class="btn" id="btn-stt-test">🩺 음성인식 테스트 (7초간 영어로 말해보세요)</button>
       <div class="feedback-box hidden" id="stt-test-box" style="margin-top:10px">
@@ -301,8 +301,8 @@
 
   <div class="toast hidden" id="toast"></div>
 
-  <script src="questions.js?v=17"></script>
-  <script src="study.js?v=17"></script>
-  <script src="app.js?v=17"></script>
+  <script src="questions.js?v=18"></script>
+  <script src="study.js?v=18"></script>
+  <script src="app.js?v=18"></script>
 </body>
 </html>

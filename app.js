@@ -118,6 +118,15 @@ function updateRecording(id, patch) {
   };
 }
 
+function getRecording(id) {
+  return new Promise((resolve) => {
+    if (!db || id == null) return resolve(null);
+    const req = db.transaction('recordings', 'readonly').objectStore('recordings').get(id);
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror = () => resolve(null);
+  });
+}
+
 function recordingBlob(r) {
   if (r.audio instanceof Blob) return r.audio; // 예전 형식 호환
   if (r.audioBuf) return new Blob([r.audioBuf], { type: r.audioType || 'audio/webm' });
@@ -406,13 +415,21 @@ function stopRecording() {
   if (state.recognition) { try { state.recognition.stop(); } catch (_) {} state.recognition = null; }
   if (state.mediaRecorder && state.mediaRecorder.state !== 'inactive') state.mediaRecorder.stop();
   clearInterval(state.recTimerId);
-  // Whisper 모드: 녹음 완료 후 AI 받아쓰기 실행
-  if (settings.sttMode === 'whisper' && wasRecording) {
+  // 녹음 완료 후 AI 받아쓰기: Whisper 모드는 항상 실행,
+  // 기본 모드는 실시간 받아쓰기가 비어 있으면 자동으로 Whisper로 전환 (기기 인식 실패 대비)
+  if (wasRecording && settings.sttMode !== 'stt-only' && state.recDuration >= 2) {
     state.whisperPromise = (async () => {
       await (state.stopPromise || Promise.resolve());
       if (!state.audioBlob) return;
+      if (settings.sttMode === 'both') {
+        // 실시간 인식의 마지막 결과가 늦게 도착할 수 있어 잠깐 기다린 뒤 확인
+        await new Promise((r) => setTimeout(r, 600));
+        if (currentTranscript().trim()) return; // 실시간 인식 성공 → Whisper 불필요
+        toast('실시간 받아쓰기가 비어 있어 AI 받아쓰기로 자동 전환합니다 🤖', 3500);
+      }
       try {
         const text = await transcribeBlob(state.audioBlob, setSttStatus);
+        if (currentTranscript().trim()) return; // 그 사이 사용자가 직접 입력했으면 유지
         if (text) {
           state.finalTranscript = text + ' ';
           $('transcript').textContent = text;
@@ -421,16 +438,13 @@ function stopRecording() {
           setSttStatus('⚠️ 음성을 인식하지 못했어요. 답변 칸에 직접 입력할 수 있어요.', true);
         }
       } catch (e) {
-        setSttStatus('⚠️ AI 받아쓰기 실패 — 인터넷 연결을 확인해주세요', true);
+        setSttStatus(`⚠️ AI 받아쓰기 실패: ${e && e.message ? e.message : e}`, true);
+        toast('AI 받아쓰기에 실패했어요. 인터넷 연결을 확인하고 다시 녹음해보세요.', 5000);
       }
     })();
   }
   $('btn-record').classList.remove('recording');
   $('rec-label').textContent = settings.sttMode === 'stt-only' ? '받아쓰기 시작' : '녹음 시작';
-  // 10초 이상 말했는데 받아쓰기가 비어 있으면 원인 안내
-  if (wasRecording && hadRecognition && state.recDuration >= 10 && !currentTranscript() && settings.sttMode === 'both') {
-    toast('받아쓰기가 인식되지 않았어요. 이 기기에서는 녹음과 동시 인식이 안 될 수 있으니, ⚙️ 설정에서 "받아쓰기 전용" 모드를 켜보세요.', 6000);
-  }
 }
 
 // 녹음이 완전히 끝나(blob 생성, AI 받아쓰기까지) 저장 가능할 때까지 대기
@@ -616,6 +630,30 @@ function showSessionResult() {
         (fullText) => { if (fullText) updateRecording(r.recId, { feedback: fullText }); });
       div.appendChild(btn);
       div.appendChild(fb);
+    } else if (r.recId != null) {
+      // 녹음은 있는데 받아쓰기가 비어 있으면 결과 화면에서 바로 AI 받아쓰기
+      const sttBtn = document.createElement('button');
+      sttBtn.className = 'btn';
+      sttBtn.style.marginTop = '10px';
+      sttBtn.textContent = '🤖 AI 받아쓰기 (녹음에서 텍스트 추출)';
+      sttBtn.onclick = async () => {
+        sttBtn.disabled = true;
+        try {
+          const rec = await getRecording(r.recId);
+          const blob = rec ? recordingBlob(rec) : null;
+          if (!blob) { sttBtn.textContent = '⚠️ 저장된 녹음이 없어요'; return; }
+          const text = await transcribeBlob(blob, (s) => { sttBtn.textContent = s; });
+          if (!text) { sttBtn.textContent = '⚠️ 음성을 인식하지 못했어요'; return; }
+          r.transcript = text;
+          updateRecording(r.recId, { transcript: text });
+          toast('받아쓰기 완료!');
+          showSessionResult(); // 갱신된 답변과 피드백 버튼 표시
+        } catch (e) {
+          sttBtn.textContent = `⚠️ 실패: ${e && e.message ? e.message : e}`;
+          sttBtn.disabled = false;
+        }
+      };
+      div.appendChild(sttBtn);
     }
     list.appendChild(div);
   });
