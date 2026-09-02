@@ -18,6 +18,7 @@ const TOPICS = [
       { level: 'desc', text: 'Describe your neighborhood. What can you see and do around where you live? What do you like about it?' },
       { level: 'routine', text: 'What do you usually do at home on weekends? Tell me about your typical weekend routine at home.' },
       { level: 'routine', text: 'What household chores do you usually do at home? When and how do you do them? Tell me in detail.' },
+      { level: 'past', text: 'Tell me about the last time you spent a whole day at home. What did you do from morning to night?' },
       { level: 'past', text: 'Tell me about a memorable experience that happened at your home. What happened, who was involved, and why was it so memorable?' },
       { level: 'past', text: 'Have you ever had a problem at home, such as something breaking or a noisy neighbor? Tell me what happened and how you solved it.' },
       { level: 'past', text: 'Tell me about a time when you had guests over at your home. What did you do to prepare, and how did it go?' },
@@ -200,6 +201,7 @@ const SURPRISE_TOPICS = [
       { level: 'desc', text: 'Tell me about the seasons in your country. What is the weather like in each season?' },
       { level: 'desc', text: 'What is your favorite season, and why? What do you usually do during that season?' },
       { level: 'desc', text: 'What is the weather like today where you live? And what is the typical weather like this time of year?' },
+      { level: 'past', text: 'What was the weather like the last time you went on an outing? How did the weather affect your day?' },
       { level: 'past', text: 'Tell me about a time when extreme weather affected your plans. What happened, and what did you do?' },
       { level: 'past', text: 'Tell me about a memorable experience related to the weather, such as a heavy snowstorm or a heatwave. What happened?' },
       { level: 'compare', text: 'Compare the weather in your country with the weather in another country you know about. How are they different?' },
@@ -227,6 +229,7 @@ const SURPRISE_TOPICS = [
       { level: 'desc', text: 'Tell me about the transportation system in your country. How do people usually get around?' },
       { level: 'desc', text: 'Describe the public transportation in your city. What options are there, and what are they like?' },
       { level: 'routine', text: 'How do you usually get to work or school? Describe your typical commute in detail.' },
+      { level: 'past', text: 'Tell me about the last time you took a long ride on public transportation. Where were you going, and how was the trip?' },
       { level: 'past', text: 'Tell me about a problem you experienced while using public transportation. What happened, and how did you deal with it?' },
       { level: 'past', text: 'Tell me about a time when you were stuck in traffic or your bus or train was delayed. What happened, and what did you do?' },
       { level: 'compare', text: 'How has transportation in your country changed over the years? Compare it with the past.' },
@@ -295,6 +298,7 @@ const SURPRISE_TOPICS = [
       { level: 'desc', text: 'What kind of clothes do people in your country usually wear? Tell me about the fashion trends these days.' },
       { level: 'routine', text: 'What kind of clothes do you usually wear? Does your style change depending on the occasion? Tell me in detail.' },
       { level: 'routine', text: 'Where do you usually buy your clothes, and how do you decide what to buy? Tell me about your clothes-shopping habits.' },
+      { level: 'past', text: 'Tell me about the last piece of clothing you bought. What was it, and why did you choose it?' },
       { level: 'past', text: 'Tell me about a time when you bought clothes for a special occasion. What did you buy, and how did the occasion go?' },
       { level: 'compare', text: 'How has fashion in your country changed over the years? Compare what people wore in the past with what they wear now.' },
       { level: 'issue', text: 'Fast fashion has become controversial because of its environmental impact. What do people in your country think about this issue?' },
@@ -307,6 +311,7 @@ const SURPRISE_TOPICS = [
     questions: [
       { level: 'routine', text: 'What kind of appointments or gatherings do you usually have with friends or family? Tell me about them.' },
       { level: 'routine', text: 'How do you usually make plans with your friends? Tell me about the process from deciding to meet to actually meeting.' },
+      { level: 'past', text: 'Tell me about the most recent gathering you had with your friends. Where did you meet, and what did you do together?' },
       { level: 'past', text: 'Tell me about a time when you had to cancel or change an appointment. What happened, and how did you handle it?' },
       { level: 'past', text: 'Tell me about a particularly memorable gathering or meeting with friends. What did you do, and why was it memorable?' },
       { level: 'past', text: 'Tell me about a time when someone was very late for an appointment with you, or you were late. What happened?' },
@@ -443,12 +448,32 @@ function difficultyFilter(level) {
   return null; // 6: 전체 허용
 }
 
-// 난이도별 세트 내 문항 유형 순서 (실제 오픽처럼 묘사→습관→경험 순으로 난이도 상승)
-function levelSeq(L) {
+// 과거 경험 문항 세분화: 최초/최근 경험 vs 인상적인 경험
+const FIRST_RECENT_RE = /\b(first|last|most recent|recently)\b|when you were (young|a child)/i;
+
+// 문항 유형 선택자: 세트 슬롯별로 원하는 유형 정의 (base는 대체 문항 탐색용 기준 레벨)
+const SLOT_SELECTORS = {
+  desc: { base: 'desc', sel: (q) => q.level === 'desc' },
+  routine: { base: 'routine', sel: (q) => q.level === 'routine' },
+  past: { base: 'past', sel: (q) => q.level === 'past' },
+  pastFirst: { base: 'past', sel: (q) => q.level === 'past' && FIRST_RECENT_RE.test(q.text) },
+  pastMemorable: { base: 'past', sel: (q) => q.level === 'past' && !FIRST_RECENT_RE.test(q.text) },
+  compare: { base: 'compare', sel: (q) => q.level === 'compare' },
+  issue: { base: 'issue', sel: (q) => q.level === 'issue' },
+};
+
+// 세트1 (2-4번): 묘사→습관→경험
+function set1Seq(L) {
   if (L <= 1) return ['desc', 'routine', 'desc'];
-  if (L <= 3) return ['desc', 'routine', 'past'];
-  if (L <= 5) return ['desc', 'past', 'compare'];
-  return ['desc', 'past', 'issue'];
+  return ['desc', 'routine', 'past'];
+}
+
+// 세트2·3 (5-7, 8-10번): 묘사→최초/최근 경험→인상적인 경험 또는 과거와의 변화
+function set23Seq(L) {
+  if (L <= 1) return ['desc', 'routine', 'desc'];
+  if (L <= 3) return ['desc', 'pastFirst', 'pastMemorable'];
+  if (L <= 5) return Math.random() < 0.5 ? ['desc', 'pastFirst', 'pastMemorable'] : ['desc', 'pastFirst', 'compare'];
+  return ['desc', 'pastFirst', 'compare'];
 }
 
 // 실제 오픽 구성:
@@ -460,7 +485,6 @@ function buildMockExam(difficulty = '5', surveyIds = null) {
   const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
   const shuffled = (arr) => [...arr].sort(() => Math.random() - 0.5);
   const LEVEL_ORDER = { desc: 0, routine: 1, past: 2, compare: 3, issue: 4 };
-  const seq = levelSeq(L);
 
   // 선택주제는 내 서베이 주제에서만 출제 (3개 미만이면 다른 주제로 보충)
   let surveyed = (surveyIds && surveyIds.length) ? TOPICS.filter((t) => surveyIds.includes(t.id)) : [...TOPICS];
@@ -479,15 +503,16 @@ function buildMockExam(difficulty = '5', surveyIds = null) {
   const rp = pick(ROLEPLAYS);
   const adv = pick(ADVANCED_SETS);
 
-  // 원하는 유형 순서(levels)대로 세트 구성 — 해당 유형이 없으면 가장 가까운 유형으로 대체
-  const pickSeq = (topic, levels) => {
+  // 원하는 슬롯 순서대로 세트 구성 — 해당 유형이 없으면 가장 가까운 유형으로 대체
+  const pickSeq = (topic, slots) => {
     const used = new Set();
-    return levels.map((lv) => {
-      let pool = topic.questions.filter((q) => q.level === lv && !used.has(q));
+    return slots.map((slot) => {
+      const { base, sel } = SLOT_SELECTORS[slot];
+      let pool = topic.questions.filter((q) => sel(q) && !used.has(q));
       if (!pool.length) {
         pool = topic.questions
           .filter((q) => !used.has(q))
-          .sort((a, b) => Math.abs(LEVEL_ORDER[a.level] - LEVEL_ORDER[lv]) - Math.abs(LEVEL_ORDER[b.level] - LEVEL_ORDER[lv]));
+          .sort((a, b) => Math.abs(LEVEL_ORDER[a.level] - LEVEL_ORDER[base]) - Math.abs(LEVEL_ORDER[b.level] - LEVEL_ORDER[base]));
         pool = pool.slice(0, 2); // 가장 가까운 유형 중에서 랜덤
       }
       const q = pick(pool);
@@ -508,13 +533,13 @@ function buildMockExam(difficulty = '5', surveyIds = null) {
         { topic: `🔥 어드밴스 (${adv.topic} 비교)`, text: adv.q14 },
         { topic: `🔥 어드밴스 (${adv.topic} 이슈)`, text: adv.q15 },
       ]
-    : pickSeq(topicC, seq.slice(0, 2));
+    : pickSeq(topicC, set1Seq(L).slice(0, 2));
 
   const exam = [
     { topic: '👤 자기소개 (채점 제외)', text: SELF_INTRO.text },
-    ...pickSeq(topicA, seq),
-    ...pickSeq(set2Topic, seq),
-    ...pickSeq(surprise3, seq),
+    ...pickSeq(topicA, set1Seq(L)),
+    ...pickSeq(set2Topic, set23Seq(L)),
+    ...pickSeq(surprise3, set23Seq(L)),
     ...roleplay,
     ...ending,
   ];
