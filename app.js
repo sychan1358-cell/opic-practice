@@ -781,9 +781,10 @@ Respond in Korean with this Markdown structure:
 
 All explanations in Korean, example sentences in English.` + EXPR_SECTION;
 
-function buildMockEvalPrompt() {
-  const lines = state.mockResults.map((r) => {
-    let block = `[Q${r.number}] (${r.topic.replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, '').trim()})\n${r.text}\n`;
+// results: [{number, topic, text, transcript, duration}] — 세션 결과 화면과 녹음 기록 양쪽에서 사용
+function buildEvalPrompt(results, mode, difficulty, startDifficulty) {
+  const lines = results.map((r) => {
+    let block = `[Q${r.number}] (${(r.topic || '').replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, '').trim()})\n${r.text}\n`;
     if (r.transcript) {
       block += `Answer: ${r.transcript}`;
       const stats = speechStats(r.transcript, r.duration);
@@ -793,17 +794,45 @@ function buildMockEvalPrompt() {
     }
     return block;
   });
-  let intro = state.mode === 'mock'
+  let intro = mode === 'mock'
     ? "Here is the student's full mock OPIc exam:"
     : "Here is the student's topic practice session:";
-  if (state.mode === 'mock' && DIFF_INFO[state.difficulty]) {
-    let diffNote = `[Exam difficulty] Self-assessment level ${DIFF_INFO[state.difficulty].prompt}`;
-    if (state.startDifficulty !== state.difficulty) {
-      diffNote += ` (Note: the student started at level ${state.startDifficulty} and changed to level ${state.difficulty} at the mid-exam self-assessment; questions 8-15 follow the new level.)`;
+  if (mode === 'mock' && DIFF_INFO[difficulty]) {
+    let diffNote = `[Exam difficulty] Self-assessment level ${DIFF_INFO[difficulty].prompt}`;
+    if (startDifficulty && startDifficulty !== difficulty) {
+      diffNote += ` (Note: the student started at level ${startDifficulty} and changed to level ${difficulty} at the mid-exam self-assessment; questions 8-15 follow the new level.)`;
     }
     intro = `${diffNote}\n\n${intro}`;
   }
   return `${intro}\n\n${lines.join('\n\n')}`;
+}
+
+function buildMockEvalPrompt() {
+  return buildEvalPrompt(state.mockResults, state.mode, state.difficulty, state.startDifficulty);
+}
+
+// 파일 다운로드 (녹음 파일, 텍스트 내보내기)
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+function audioExt(type) {
+  if (!type) return 'webm';
+  if (type.includes('mp4') || type.includes('m4a') || type.includes('aac')) return 'm4a';
+  if (type.includes('ogg')) return 'ogg';
+  if (type.includes('wav')) return 'wav';
+  return 'webm';
+}
+
+function safeName(s) {
+  return (s || '').replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}️]/gu, '').replace(/[\\/:*?"<>|]/g, '').trim().replace(/\s+/g, '_').slice(0, 30);
 }
 
 async function callClaude(system, userText, targetEl, onDone) {
@@ -976,17 +1005,60 @@ async function renderHistory(filter = 'all') {
     header.textContent = `${modeLabel} · ${timeStr} · ${g.items.length}문항`;
     list.appendChild(header);
 
-    // 저장된 종합 평가 표시
+    const sorted = [...g.items].sort((a, b) => (a.number || 0) - (b.number || 0));
+    const dateTag = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}_${timeStr.replace(':', '')}`;
+    const sessionName = `${first.mode === 'mock' ? '모의고사' : '주제연습'}_${dateTag}`;
+
+    // 세션 단위 액션: 종합 피드백 / 텍스트 저장
+    const sessionActions = document.createElement('div');
+    sessionActions.className = 'h-actions';
+    sessionActions.style.marginBottom = '10px';
     const withSession = g.items.find((r) => r.sessionFeedback);
-    if (withSession) {
-      const box = document.createElement('div');
-      box.className = 'history-item';
-      box.innerHTML = `<div class="h-meta">🏆 종합 평가</div><div class="feedback-content">${renderMarkdown(withSession.sessionFeedback)}</div>`;
-      list.appendChild(box);
+    const sessionFbBox = document.createElement('div');
+    sessionFbBox.className = 'history-item';
+    sessionFbBox.innerHTML = `<div class="h-meta">🏆 종합 평가</div><div class="feedback-content" id="sfb-${g.key}"></div>`;
+    if (withSession) sessionFbBox.querySelector('.feedback-content').innerHTML = renderMarkdown(withSession.sessionFeedback);
+    else sessionFbBox.classList.add('hidden');
+
+    if (g.items.some((r) => r.transcript)) {
+      const sBtn = document.createElement('button');
+      sBtn.className = 'btn primary';
+      sBtn.textContent = withSession ? '🏆 종합 피드백 다시 받기' : (first.mode === 'mock' ? '🏆 종합 등급 예측' : '🏆 주제 종합 피드백');
+      sBtn.onclick = () => {
+        sBtn.disabled = true;
+        sessionFbBox.classList.remove('hidden');
+        const target = sessionFbBox.querySelector('.feedback-content');
+        const results = sorted.map((r) => ({ number: r.number, topic: r.topic, text: r.question, transcript: r.transcript || '', duration: r.duration }));
+        const system = first.mode === 'mock' ? MOCK_EVAL_SYSTEM : TOPIC_EVAL_SYSTEM;
+        callClaude(system, buildEvalPrompt(results, first.mode, first.difficulty, null), target, async (fullText) => {
+          sBtn.disabled = false;
+          const stripped = await harvestExpressions(fullText, first.mode === 'mock' ? '모의고사 종합 평가' : '주제 종합 피드백', target);
+          if (stripped) { updateRecording(first.id, { sessionFeedback: stripped }); first.sessionFeedback = stripped; }
+        });
+      };
+      sessionActions.appendChild(sBtn);
     }
+    const exportBtn = document.createElement('button');
+    exportBtn.className = 'btn ghost';
+    exportBtn.textContent = '📄 텍스트로 저장';
+    exportBtn.onclick = () => {
+      const parts = [`# OPIc ${modeLabel.replace(/[📝🎯]/g, '').trim()} — ${date.toLocaleString('ko-KR')}`, ''];
+      const sf = g.items.find((r) => r.sessionFeedback);
+      if (sf) parts.push('## 🏆 종합 평가', '', sf.sessionFeedback, '', '---', '');
+      sorted.forEach((r) => {
+        parts.push(`## Q${r.number || '?'}. ${r.topic || ''}`, '', `**질문:** ${r.question || ''}`, '',
+          `**내 답변${r.duration ? ` (${fmtTime(r.duration)})` : ''}:** ${r.transcript || '(답변 없음)'}`, '');
+        if (r.feedback) parts.push('### 🤖 AI 피드백', '', r.feedback, '');
+        parts.push('---', '');
+      });
+      downloadBlob(new Blob([parts.join('\n')], { type: 'text/markdown;charset=utf-8' }), `${sessionName}.md`);
+    };
+    sessionActions.appendChild(exportBtn);
+    list.appendChild(sessionActions);
+    list.appendChild(sessionFbBox);
 
     // 세션 안에서는 문항 순서대로
-    [...g.items].sort((a, b) => (a.number || 0) - (b.number || 0)).forEach((r) => {
+    sorted.forEach((r) => {
       const div = document.createElement('div');
       div.className = 'history-item';
       div.innerHTML = `
@@ -1008,39 +1080,50 @@ async function renderHistory(filter = 'all') {
       else fb.classList.add('hidden');
       const actions = document.createElement('div');
       actions.className = 'h-actions';
+      const answerEl = div.querySelector('.r-answer');
+      const runFeedback = (fbBtn) => {
+        fb.classList.remove('hidden');
+        requestFeedback(r.question, r.transcript, fb, fbBtn, r.duration,
+          (fullText) => { if (fullText) { updateRecording(r.id, { feedback: fullText }); r.feedback = fullText; } });
+      };
       if (r.transcript) {
         const fbBtn = document.createElement('button');
         fbBtn.className = 'btn primary';
         fbBtn.textContent = r.feedback ? '🤖 피드백 다시 받기' : '🤖 AI 피드백';
-        fbBtn.onclick = () => {
-          fb.classList.remove('hidden');
-          requestFeedback(r.question, r.transcript, fb, fbBtn, r.duration,
-            (fullText) => { if (fullText) updateRecording(r.id, { feedback: fullText }); });
-        };
+        fbBtn.onclick = () => runFeedback(fbBtn);
         actions.appendChild(fbBtn);
-      }
-      if (!r.transcript && blob) {
-        const sttBtn = document.createElement('button');
-        sttBtn.className = 'btn';
-        sttBtn.textContent = '🤖 AI 받아쓰기';
-        sttBtn.onclick = async () => {
-          sttBtn.disabled = true;
+      } else if (blob) {
+        // 받아쓰기가 없는 녹음: AI 받아쓰기 → 바로 피드백까지 한 번에
+        const chainBtn = document.createElement('button');
+        chainBtn.className = 'btn primary';
+        chainBtn.textContent = '🤖 받아쓰기 후 AI 피드백';
+        chainBtn.onclick = async () => {
+          chainBtn.disabled = true;
           try {
-            const text = await transcribeBlob(blob, (s) => { sttBtn.textContent = s; });
-            if (text) {
-              updateRecording(r.id, { transcript: text });
-              toast('받아쓰기 완료! 이제 AI 피드백도 받을 수 있어요');
-              const active = document.querySelector('[data-hfilter].active');
-              renderHistory(active ? active.dataset.hfilter : 'all');
-            } else {
-              sttBtn.textContent = '⚠️ 음성 인식 실패';
-            }
+            const text = await transcribeBlob(blob, (s) => { chainBtn.textContent = s; });
+            if (!text) { chainBtn.textContent = '⚠️ 음성을 인식하지 못했어요'; return; }
+            r.transcript = text;
+            updateRecording(r.id, { transcript: text });
+            const ans = document.createElement('div');
+            ans.className = 'r-answer';
+            ans.textContent = text;
+            div.insertBefore(ans, div.querySelector('audio'));
+            chainBtn.textContent = '🤖 AI 피드백';
+            chainBtn.disabled = false;
+            runFeedback(chainBtn);
           } catch (e) {
-            sttBtn.textContent = '⚠️ 실패 — 다시 시도';
-            sttBtn.disabled = false;
+            chainBtn.textContent = '⚠️ 실패 — 다시 시도';
+            chainBtn.disabled = false;
           }
         };
-        actions.appendChild(sttBtn);
+        actions.appendChild(chainBtn);
+      }
+      if (blob) {
+        const dlBtn = document.createElement('button');
+        dlBtn.className = 'btn ghost';
+        dlBtn.textContent = '⬇️ 녹음 다운로드';
+        dlBtn.onclick = () => downloadBlob(blob, `${sessionName}_Q${r.number || 0}_${safeName(r.topic)}.${audioExt(blob.type)}`);
+        actions.appendChild(dlBtn);
       }
       const delBtn = document.createElement('button');
       delBtn.className = 'btn ghost';
