@@ -443,14 +443,24 @@ function difficultyFilter(level) {
   return null; // 6: 전체 허용
 }
 
+// 난이도별 세트 내 문항 유형 순서 (실제 오픽처럼 묘사→습관→경험 순으로 난이도 상승)
+function levelSeq(L) {
+  if (L <= 1) return ['desc', 'routine', 'desc'];
+  if (L <= 3) return ['desc', 'routine', 'past'];
+  if (L <= 5) return ['desc', 'past', 'compare'];
+  return ['desc', 'past', 'issue'];
+}
+
+// 실제 오픽 구성:
+// 1번 자기소개(채점 제외) | 2-4 세트1: 서베이 주제 | 5-7 세트2: 서베이 또는 돌발
+// 8-10 세트3: 돌발 | 11-13 세트4: 롤플레이 | 14-15 세트5: 어드밴스(난이도 5-6만)
 // surveyIds: 사용자가 서베이에서 고른 주제 id 배열 (없으면 전체 주제 사용)
 function buildMockExam(difficulty = '5', surveyIds = null) {
   const L = Math.min(6, Math.max(1, parseInt(difficulty, 10) || 5));
   const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
   const shuffled = (arr) => [...arr].sort(() => Math.random() - 0.5);
-  const isHard = (q) => q.level === 'compare' || q.level === 'issue';
-  const filter = difficultyFilter(L);
-  const ensureHard = L >= 6;
+  const LEVEL_ORDER = { desc: 0, routine: 1, past: 2, compare: 3, issue: 4 };
+  const seq = levelSeq(L);
 
   // 선택주제는 내 서베이 주제에서만 출제 (3개 미만이면 다른 주제로 보충)
   let surveyed = (surveyIds && surveyIds.length) ? TOPICS.filter((t) => surveyIds.includes(t.id)) : [...TOPICS];
@@ -458,29 +468,32 @@ function buildMockExam(difficulty = '5', surveyIds = null) {
   if (surveyed.length < 3) surveyed = surveyed.concat(shuffled(nonSurveyed).slice(0, 3 - surveyed.length));
 
   const [topicA, topicB, topicC] = shuffled(surveyed).slice(0, 3);
-  // 돌발: 난이도 4 이상이면 서베이에 없는 선택주제에서도 돌발 출제 (실제 오픽처럼)
-  const surprisePool = L >= 4 ? [...SURPRISE_TOPICS, ...nonSurveyed] : SURPRISE_TOPICS;
-  const surprise = pick(surprisePool);
+  // 돌발 풀: 난이도 4 이상이면 서베이에 없는 선택주제에서도 돌발 출제 (실제 오픽처럼)
+  const surprisePool = L >= 4 ? [...SURPRISE_TOPICS, ...nonSurveyed] : [...SURPRISE_TOPICS];
+  const surprise3 = pick(surprisePool);
+  // 세트2: 서베이 주제 또는 돌발 주제 (50%) — 세트3과는 다른 돌발 주제 보장
+  const useSurpriseForSet2 = Math.random() < 0.5;
+  const surprise2Pool = surprisePool.filter((t) => t !== surprise3);
+  const set2Topic = useSurpriseForSet2 && surprise2Pool.length ? pick(surprise2Pool) : topicB;
+
   const rp = pick(ROLEPLAYS);
   const adv = pick(ADVANCED_SETS);
 
-  // 세트 뽑기: filter로 난이도 제한, ensureHard면 비교/이슈 문항 1개 이상 보장
-  const LEVEL_ORDER = { desc: 0, routine: 1, past: 2, compare: 3, issue: 4 };
-  const pickSet = (topic, n) => {
-    const pool = filter ? topic.questions.filter(filter) : [...topic.questions];
-    let qs = shuffled(pool).slice(0, n);
-    // 필터로 문항이 부족하면 가장 쉬운 문항부터 채워 15문항 유지
-    if (qs.length < n) {
-      const rest = topic.questions
-        .filter((q) => !qs.includes(q))
-        .sort((a, b) => LEVEL_ORDER[a.level] - LEVEL_ORDER[b.level]);
-      qs = qs.concat(rest.slice(0, n - qs.length));
-    }
-    if (ensureHard && !qs.some(isHard)) {
-      const hardLeft = pool.filter((q) => isHard(q) && !qs.includes(q));
-      if (hardLeft.length) qs[qs.length - 1] = pick(hardLeft);
-    }
-    return qs.map((q) => ({ topic: `${topic.icon} ${topic.name}`, text: q.text }));
+  // 원하는 유형 순서(levels)대로 세트 구성 — 해당 유형이 없으면 가장 가까운 유형으로 대체
+  const pickSeq = (topic, levels) => {
+    const used = new Set();
+    return levels.map((lv) => {
+      let pool = topic.questions.filter((q) => q.level === lv && !used.has(q));
+      if (!pool.length) {
+        pool = topic.questions
+          .filter((q) => !used.has(q))
+          .sort((a, b) => Math.abs(LEVEL_ORDER[a.level] - LEVEL_ORDER[lv]) - Math.abs(LEVEL_ORDER[b.level] - LEVEL_ORDER[lv]));
+        pool = pool.slice(0, 2); // 가장 가까운 유형 중에서 랜덤
+      }
+      const q = pick(pool);
+      if (q) used.add(q);
+      return q;
+    }).filter(Boolean).map((q) => ({ topic: `${topic.icon} ${topic.name}`, text: q.text }));
   };
 
   const roleplay = [
@@ -489,19 +502,19 @@ function buildMockExam(difficulty = '5', surveyIds = null) {
     { topic: `${rp.icon} 롤플레이 (관련경험)`, text: rp.q13 },
   ];
 
-  // 14-15번: 난이도 5 이상은 고난도 세트, 이하는 세 번째 주제 문항 2개
+  // 세트5 (14-15번): 난이도 5-6은 어드밴스 문제, 이하는 세 번째 서베이 주제 세트
   const ending = L >= 5
     ? [
-        { topic: `🔥 고난도 (${adv.topic} 비교)`, text: adv.q14 },
-        { topic: `🔥 고난도 (${adv.topic} 이슈)`, text: adv.q15 },
+        { topic: `🔥 어드밴스 (${adv.topic} 비교)`, text: adv.q14 },
+        { topic: `🔥 어드밴스 (${adv.topic} 이슈)`, text: adv.q15 },
       ]
-    : pickSet(topicC, 2);
+    : pickSeq(topicC, seq.slice(0, 2));
 
   const exam = [
-    { topic: '👤 자기소개', text: SELF_INTRO.text },
-    ...pickSet(topicA, 3),
-    ...pickSet(topicB, 3),
-    ...pickSet(surprise, 3),
+    { topic: '👤 자기소개 (채점 제외)', text: SELF_INTRO.text },
+    ...pickSeq(topicA, seq),
+    ...pickSeq(set2Topic, seq),
+    ...pickSeq(surprise3, seq),
     ...roleplay,
     ...ending,
   ];
