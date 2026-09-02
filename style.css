@@ -221,3 +221,7 @@ audio { width: 100%; margin-top: 14px; }
 /* 음성인식 상태 표시 */
 .stt-status { text-align: center; font-size: 13px; color: var(--muted); min-height: 18px; margin-bottom: 6px; }
 .stt-status.error { color: var(--danger); }
+
+/* 녹음 완료 후 비활성화된 녹음 버튼 */
+.record-btn:disabled { opacity: .55; cursor: not-allowed; border-color: var(--border); }
+.record-btn:disabled .rec-dot { background: var(--muted); }

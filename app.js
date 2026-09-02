@@ -404,6 +404,8 @@ async function startRecording() {
   state.recTimerId = setInterval(() => {
     $('rec-time').textContent = fmtTime((Date.now() - state.recStartTime) / 1000);
   }, 250);
+  // 모의고사 제한시간은 녹음하는 동안만 흐름
+  if (state.mode === 'mock' && settings.timerSec > 0) startQuestionTimer(settings.timerSec);
 }
 
 function stopRecording() {
@@ -450,9 +452,15 @@ function stopRecording() {
     })();
   }
   $('btn-record').classList.remove('recording');
-  $('rec-label').textContent = settings.sttMode === 'stt-only' ? '받아쓰기 시작' : '녹음 시작';
-  // 녹음이 끝났고 아직 다시 녹음을 안 썼으면 버튼 표시
-  if (wasRecording && !state.retakeUsed) $('btn-retake').classList.remove('hidden');
+  stopQuestionTimer(); // 제한시간은 녹음 중에만 흐름 (남은 시간은 화면에 그대로 유지)
+  if (wasRecording) {
+    // 녹음 완료: 재시도는 '다시 녹음'(1회)으로만 가능
+    $('btn-record').disabled = true;
+    $('rec-label').textContent = '✅ 녹음 완료';
+    if (!state.retakeUsed) $('btn-retake').classList.remove('hidden');
+  } else {
+    $('rec-label').textContent = settings.sttMode === 'stt-only' ? '받아쓰기 시작' : '녹음 시작';
+  }
 }
 
 // 다시 녹음 (문항당 1회): 이전 녹음·받아쓰기를 지우고 새로 녹음
@@ -471,7 +479,11 @@ function retakeRecording() {
   $('rec-time').textContent = '0:00';
   setSttStatus('');
   $('btn-retake').classList.add('hidden');
-  toast('이전 녹음을 지웠어요. 다시 녹음하세요 (재녹음은 1회만 가능)', 3500);
+  // 녹음 버튼 다시 활성화 + 제한시간 새로 부여 (녹음 시작 때부터 흐름)
+  $('btn-record').disabled = false;
+  $('rec-label').textContent = settings.sttMode === 'stt-only' ? '받아쓰기 시작' : '녹음 시작';
+  if (state.mode === 'mock' && settings.timerSec > 0) showTimerIdle(settings.timerSec);
+  toast('이전 녹음을 지웠어요. 제한시간도 새로 주어집니다 (재녹음은 1회만 가능)', 3500);
 }
 
 // 녹음이 완전히 끝나(blob 생성, AI 받아쓰기까지) 저장 가능할 때까지 대기
@@ -532,14 +544,26 @@ function renderQuestion() {
     ? (state.mode === 'mock' ? '시험 종료 →' : '완료')
     : '다음 문항 →';
 
-  // 모의고사: 질문 자동 재생 + 타이머
+  // 새 문항: 녹음 버튼 활성화 (녹음 완료 후엔 '다시 녹음'으로만 재시도 가능)
+  $('btn-record').disabled = false;
+
+  // 모의고사: 질문 자동 재생 + 제한시간 표시 (타이머는 녹음 시작 버튼을 누를 때부터 흐름)
   if (state.mode === 'mock') {
     speakQuestion(q.text);
-    if (settings.timerSec > 0) startQuestionTimer(settings.timerSec);
+    if (settings.timerSec > 0) showTimerIdle(settings.timerSec);
     else $('q-timer').classList.add('hidden');
   } else {
     $('q-timer').classList.add('hidden');
   }
+}
+
+// 제한시간을 멈춘 상태로 표시 (녹음 시작 전 / 다시 녹음 후)
+function showTimerIdle(sec) {
+  stopQuestionTimer();
+  state.qTimeLeft = sec;
+  const el = $('q-timer');
+  el.classList.remove('hidden', 'warning');
+  el.textContent = fmtTime(sec);
 }
 
 function startQuestionTimer(sec) {
