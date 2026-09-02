@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>OPIc 연습실</title>
-  <link rel="stylesheet" href="style.css?v=21" />
+  <link rel="stylesheet" href="style.css?v=22" />
 </head>
 <body>
   <header class="topbar">
@@ -146,10 +146,22 @@
       </div>
       <div class="q-card">
         <div class="q-topic" id="q-topic"></div>
-        <div class="q-text" id="q-text"></div>
+        <div class="interviewer">
+          <div class="avatar" id="avatar" aria-hidden="true">
+            <div class="av-hair"></div>
+            <div class="av-face">
+              <div class="av-eye left"></div>
+              <div class="av-eye right"></div>
+              <div class="av-mouth"></div>
+            </div>
+            <div class="av-body"></div>
+          </div>
+          <div class="av-name">Ava · 인터뷰어</div>
+        </div>
+        <div class="q-text blurred" id="q-text"></div>
         <div class="q-actions">
           <button class="btn ghost" id="btn-listen">🔊 질문 듣기</button>
-          <button class="btn ghost" id="btn-toggle-text">👁️ 질문 숨기기</button>
+          <button class="btn ghost" id="btn-toggle-text">👁️ 질문 보기</button>
         </div>
       </div>
 
@@ -272,13 +284,14 @@
       <input type="password" id="api-key-input" class="text-input" placeholder="sk-ant-..." />
       <p class="hint">키는 이 브라우저(localStorage)에만 저장되며 Anthropic API 호출에만 사용됩니다.<br>
       키 발급: <a href="https://console.anthropic.com/" target="_blank">console.anthropic.com</a></p>
-      <label class="field-label">답변 제한시간 (모의고사)</label>
-      <select id="timer-select" class="text-input">
-        <option value="90">1분 30초</option>
-        <option value="120" selected>2분</option>
-        <option value="150">2분 30초</option>
+      <label class="field-label">모의고사 전체 제한시간 (실제 오픽 본시험 40분)</label>
+      <select id="exam-time-select" class="text-input">
+        <option value="30">30분</option>
+        <option value="40" selected>40분 (실제 시험)</option>
+        <option value="50">50분</option>
         <option value="0">제한 없음</option>
       </select>
+      <p class="hint">문항별 제한은 없고, 전체 시간 안에서 15문항을 자유롭게 배분합니다. 시간이 다 되면 자동으로 종료돼요.</p>
       <label class="field-label">내 서베이 주제 (모의고사 선택주제 출제에 반영, 3개 이상 선택)</label>
       <div class="topic-grid" id="survey-grid"></div>
       <p class="hint">난이도 4단계 이상에서는 실제 오픽처럼 서베이에 없는 주제에서도 돌발 문제가 나올 수 있어요.</p>
@@ -302,8 +315,8 @@
 
   <div class="toast hidden" id="toast"></div>
 
-  <script src="questions.js?v=21"></script>
-  <script src="study.js?v=21"></script>
-  <script src="app.js?v=21"></script>
+  <script src="questions.js?v=22"></script>
+  <script src="study.js?v=22"></script>
+  <script src="app.js?v=22"></script>
 </body>
 </html>

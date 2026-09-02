@@ -225,3 +225,38 @@ audio { width: 100%; margin-top: 14px; }
 /* 녹음 완료 후 비활성화된 녹음 버튼 */
 .record-btn:disabled { opacity: .55; cursor: not-allowed; border-color: var(--border); }
 .record-btn:disabled .rec-dot { background: var(--muted); }
+
+/* 인터뷰어 아바타 */
+.interviewer { display: flex; flex-direction: column; align-items: center; margin: 6px 0 14px; }
+.avatar { position: relative; width: 120px; height: 130px; }
+.av-hair {
+  position: absolute; left: 14px; top: 0; width: 92px; height: 60px;
+  background: #3b2a25; border-radius: 50px 50px 14px 14px;
+}
+.av-face {
+  position: absolute; left: 22px; top: 14px; width: 76px; height: 84px;
+  background: #f3c9a9; border-radius: 42px 42px 38px 38px;
+}
+.av-eye {
+  position: absolute; top: 36px; width: 10px; height: 12px; background: #2b1d1a; border-radius: 50%;
+  animation: blink 4.5s infinite;
+}
+.av-eye.left { left: 20px; }
+.av-eye.right { right: 20px; }
+@keyframes blink { 0%, 92%, 100% { transform: scaleY(1); } 95% { transform: scaleY(.1); } }
+.av-mouth {
+  position: absolute; left: 50%; bottom: 16px; width: 22px; height: 6px; margin-left: -11px;
+  background: #b5504f; border-radius: 0 0 12px 12px; transition: height .12s;
+}
+.avatar.speaking .av-mouth { animation: talk .28s infinite alternate; }
+@keyframes talk { from { height: 5px; width: 20px; margin-left: -10px; } to { height: 14px; width: 24px; margin-left: -12px; border-radius: 10px; } }
+.av-body {
+  position: absolute; left: 10px; bottom: 0; width: 100px; height: 38px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2)); border-radius: 40px 40px 6px 6px;
+}
+.avatar.speaking::after {
+  content: ''; position: absolute; inset: -8px; border-radius: 50%;
+  border: 2px solid var(--accent); opacity: .5; animation: pulse 1.1s infinite;
+}
+@keyframes pulse { from { transform: scale(.96); opacity: .6; } to { transform: scale(1.06); opacity: 0; } }
+.av-name { font-size: 12px; color: var(--muted); margin-top: 6px; }

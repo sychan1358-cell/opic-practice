@@ -19,8 +19,13 @@ const state = {
   sttActive: false,
   lastSttError: null,
   whisperPromise: null,
-  retakeUsed: false,     // 문항당 다시 녹음 1회
+  retakeUsed: false,     // 문항당 다시 녹음 1회 (연습 모드)
   recToken: 0,           // 다시 녹음 시 이전 AI 받아쓰기 결과 무시용
+  replayUsed: false,     // 모의고사 Replay 1회
+  mockPhase: 'ready',    // 'playing' (질문 재생 중) | 'ready'
+  ttsSession: 0,         // 질문 재생 세션 (이전 재생의 onend 무시용)
+  examTimerId: null,     // 시험 전체 타이머
+  examTimeLeft: 0,
   finalTranscript: '',
   qTimerId: null,
   qTimeLeft: 0,
@@ -62,8 +67,8 @@ function fmtTime(sec) {
 const settings = {
   get apiKey() { return localStorage.getItem('opic_api_key') || ''; },
   set apiKey(v) { localStorage.setItem('opic_api_key', v); },
-  get timerSec() { return parseInt(localStorage.getItem('opic_timer') || '120', 10); },
-  set timerSec(v) { localStorage.setItem('opic_timer', String(v)); },
+  get examMin() { return parseInt(localStorage.getItem('opic_exam_min') || '40', 10); },
+  set examMin(v) { localStorage.setItem('opic_exam_min', String(v)); },
   get sttMode() { return localStorage.getItem('opic_stt_mode') || 'both'; },
   set sttMode(v) { localStorage.setItem('opic_stt_mode', v); },
   get surveyIds() {
@@ -216,7 +221,7 @@ if ('speechSynthesis' in window) {
   speechSynthesis.onvoiceschanged = loadVoices;
 }
 
-function speakQuestion(text, onEnd) {
+function speakQuestion(text, onEnd, onStart) {
   if (!('speechSynthesis' in window)) return toast('이 브라우저는 음성 합성을 지원하지 않습니다');
   speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text);
@@ -225,7 +230,10 @@ function speakQuestion(text, onEnd) {
   const preferred = voices.find((v) => v.lang === 'en-US' && /female|samantha|zira|aria|jenny/i.test(v.name))
     || voices.find((v) => v.lang === 'en-US') || voices[0];
   if (preferred) u.voice = preferred;
-  if (onEnd) u.onend = onEnd;
+  u.onstart = () => { setAvatarSpeaking(true); if (onStart) onStart(); };
+  const finish = () => { setAvatarSpeaking(false); if (onEnd) onEnd(); };
+  u.onend = finish;
+  u.onerror = finish;
   speechSynthesis.speak(u);
 }
 
@@ -404,8 +412,6 @@ async function startRecording() {
   state.recTimerId = setInterval(() => {
     $('rec-time').textContent = fmtTime((Date.now() - state.recStartTime) / 1000);
   }, 250);
-  // 모의고사 제한시간은 녹음하는 동안만 흐름
-  if (state.mode === 'mock' && settings.timerSec > 0) startQuestionTimer(settings.timerSec);
 }
 
 function stopRecording() {
@@ -452,12 +458,12 @@ function stopRecording() {
     })();
   }
   $('btn-record').classList.remove('recording');
-  stopQuestionTimer(); // 제한시간은 녹음 중에만 흐름 (남은 시간은 화면에 그대로 유지)
   if (wasRecording) {
-    // 녹음 완료: 재시도는 '다시 녹음'(1회)으로만 가능
+    // 녹음 완료: 모의고사는 답변 1회(재시도 불가), 연습은 '다시 녹음' 1회 가능
     $('btn-record').disabled = true;
     $('rec-label').textContent = '✅ 녹음 완료';
-    if (!state.retakeUsed) $('btn-retake').classList.remove('hidden');
+    if (state.mode === 'mock') $('btn-listen').disabled = true; // 답변 후엔 Replay 불가
+    else if (!state.retakeUsed) $('btn-retake').classList.remove('hidden');
   } else {
     $('rec-label').textContent = settings.sttMode === 'stt-only' ? '받아쓰기 시작' : '녹음 시작';
   }
@@ -465,6 +471,7 @@ function stopRecording() {
 
 // 다시 녹음 (문항당 1회): 이전 녹음·받아쓰기를 지우고 새로 녹음
 function retakeRecording() {
+  if (state.mode === 'mock') return toast('실제 시험처럼 모의고사에서는 답변을 한 번만 할 수 있어요');
   if (state.retakeUsed) return toast('다시 녹음은 문항당 1회만 가능해요');
   if (state.recording) stopRecording();
   state.retakeUsed = true;
@@ -479,11 +486,9 @@ function retakeRecording() {
   $('rec-time').textContent = '0:00';
   setSttStatus('');
   $('btn-retake').classList.add('hidden');
-  // 녹음 버튼 다시 활성화 + 제한시간 새로 부여 (녹음 시작 때부터 흐름)
   $('btn-record').disabled = false;
   $('rec-label').textContent = settings.sttMode === 'stt-only' ? '받아쓰기 시작' : '녹음 시작';
-  if (state.mode === 'mock' && settings.timerSec > 0) showTimerIdle(settings.timerSec);
-  toast('이전 녹음을 지웠어요. 제한시간도 새로 주어집니다 (재녹음은 1회만 가능)', 3500);
+  toast('이전 녹음을 지웠어요. 다시 녹음하세요 (재녹음은 1회만 가능)', 3500);
 }
 
 // 녹음이 완전히 끝나(blob 생성, AI 받아쓰기까지) 저장 가능할 때까지 대기
@@ -515,22 +520,27 @@ function startPracticeSession(mode, queue) {
   state.startDifficulty = state.difficulty;
   state.secondAssessed = false;
   state.sessionId = Date.now();
+  // 모의고사: 시험 전체 타이머 시작 (실제 오픽처럼 문항별 제한 없이 총 시간 안에서 자유 배분)
+  if (mode === 'mock' && settings.examMin > 0) startExamTimer(settings.examMin);
+  else stopExamTimer();
   show('question');
   renderQuestion();
 }
 
 function renderQuestion() {
   stopRecording();
-  stopQuestionTimer();
   speechSynthesis.cancel();
+  state.ttsSession++;
 
   const q = state.queue[state.qIndex];
+  const isMock = state.mode === 'mock';
   $('q-progress').textContent = `문항 ${state.qIndex + 1} / ${state.queue.length}`;
   $('q-topic').textContent = q.topic;
   $('q-text').textContent = q.text;
-  $('q-text').classList.remove('blurred');
-  state.questionVisible = true;
-  $('btn-toggle-text').textContent = '👁️ 질문 숨기기';
+  // 질문 텍스트는 기본 숨김 (실제 시험처럼 듣기 위주) — 필요하면 '질문 보기'로 확인
+  state.questionVisible = false;
+  $('q-text').classList.add('blurred');
+  $('btn-toggle-text').textContent = '👁️ 질문 보기';
   $('transcript').textContent = '';
   state.finalTranscript = '';
   state.recDuration = 0;
@@ -541,51 +551,110 @@ function renderQuestion() {
   state.recToken++;
   $('btn-retake').classList.add('hidden');
   $('btn-next-q').textContent = state.qIndex + 1 >= state.queue.length
-    ? (state.mode === 'mock' ? '시험 종료 →' : '완료')
-    : '다음 문항 →';
-
-  // 새 문항: 녹음 버튼 활성화 (녹음 완료 후엔 '다시 녹음'으로만 재시도 가능)
+    ? (isMock ? '시험 종료 →' : '완료')
+    : (isMock ? 'Next →' : '다음 문항 →');
   $('btn-record').disabled = false;
+  setAvatarSpeaking(false);
 
-  // 모의고사: 질문 자동 재생 + 제한시간 표시 (타이머는 녹음 시작 버튼을 누를 때부터 흐름)
-  if (state.mode === 'mock') {
-    speakQuestion(q.text);
-    if (settings.timerSec > 0) showTimerIdle(settings.timerSec);
-    else $('q-timer').classList.add('hidden');
+  if (isMock) {
+    // 실제 오픽: 질문 자동 재생 → 끝나면 녹음 자동 시작, Replay 1회
+    state.replayUsed = false;
+    const listenBtn = $('btn-listen');
+    listenBtn.textContent = '🔁 Replay (1회 남음)';
+    listenBtn.disabled = true;
+    listenBtn.classList.remove('hidden');
+    $('q-timer').classList.toggle('hidden', !state.examTimerId);
+    playQuestionThenRecord();
   } else {
+    $('btn-listen').textContent = '🔊 질문 듣기';
+    $('btn-listen').disabled = false;
     $('q-timer').classList.add('hidden');
   }
 }
 
-// 제한시간을 멈춘 상태로 표시 (녹음 시작 전 / 다시 녹음 후)
-function showTimerIdle(sec) {
-  stopQuestionTimer();
-  state.qTimeLeft = sec;
-  const el = $('q-timer');
-  el.classList.remove('hidden', 'warning');
-  el.textContent = fmtTime(sec);
+// 모의고사: 질문을 재생하고, 재생이 끝나면 답변 녹음을 자동으로 시작
+function playQuestionThenRecord() {
+  const q = state.queue[state.qIndex];
+  const session = ++state.ttsSession;
+  state.mockPhase = 'playing';
+  $('btn-record').disabled = true;
+  $('rec-label').textContent = '🔊 질문 재생 중...';
+  $('btn-listen').disabled = true;
+  let done = false;
+  const proceed = () => {
+    if (done || session !== state.ttsSession) return;
+    done = true;
+    state.mockPhase = 'ready';
+    $('btn-record').disabled = false;
+    $('rec-label').textContent = settings.sttMode === 'stt-only' ? '받아쓰기 시작' : '녹음 시작';
+    if (!state.replayUsed) $('btn-listen').disabled = false;
+    startRecording(); // 권한 문제로 실패하면 버튼이 활성화된 채 남아 수동 시작 가능
+  };
+  if (!('speechSynthesis' in window)) return proceed();
+  let started = false;
+  speakQuestion(q.text, proceed, () => { started = true; });
+  // 안전장치 1: 2.5초 안에 재생이 시작되지 않으면(음성 팩 없음 등) 취소하고 진행
+  setTimeout(() => {
+    if (!done && !started && session === state.ttsSession) { speechSynthesis.cancel(); proceed(); }
+  }, 2500);
+  // 안전장치 2: 문장 길이 대비 너무 오래 걸리면(onend 미발생 기기) 강제 진행
+  const maxMs = 4000 + q.text.split(/\s+/).length * 700;
+  setTimeout(() => {
+    if (!done && session === state.ttsSession) { speechSynthesis.cancel(); proceed(); }
+  }, maxMs);
 }
 
-function startQuestionTimer(sec) {
-  state.qTimeLeft = sec;
+// Replay (모의고사, 1회): 진행 중인 답변은 버리고 질문을 다시 들은 뒤 녹음 재시작
+function replayQuestion() {
+  if (state.mode !== 'mock') return speakQuestion(state.queue[state.qIndex].text);
+  if (state.replayUsed || state.mockPhase !== 'ready') return;
+  state.replayUsed = true;
+  $('btn-listen').textContent = '🔁 Replay 사용함';
+  $('btn-listen').disabled = true;
+  if (state.recording) stopRecording();
+  state.recToken++;
+  state.audioBlob = null;
+  state.audioChunks = [];
+  state.finalTranscript = '';
+  state.recDuration = 0;
+  state.stopPromise = null;
+  state.whisperPromise = null;
+  $('transcript').textContent = '';
+  $('rec-time').textContent = '0:00';
+  setSttStatus('');
+  $('btn-retake').classList.add('hidden');
+  playQuestionThenRecord();
+}
+
+// ===== 시험 전체 타이머 (모의고사) =====
+function startExamTimer(minutes) {
+  stopExamTimer();
+  state.examTimeLeft = minutes * 60;
   const el = $('q-timer');
   el.classList.remove('hidden', 'warning');
-  el.textContent = fmtTime(sec);
-  state.qTimerId = setInterval(() => {
-    state.qTimeLeft--;
-    el.textContent = fmtTime(Math.max(0, state.qTimeLeft));
-    if (state.qTimeLeft <= 20) el.classList.add('warning');
-    if (state.qTimeLeft <= 0) {
-      stopQuestionTimer();
-      toast('⏰ 시간 종료! 다음 문항으로 넘어가세요.');
-      if (state.recording) stopRecording();
+  el.textContent = `⏱ ${fmtTime(state.examTimeLeft)}`;
+  state.examTimerId = setInterval(async () => {
+    state.examTimeLeft--;
+    el.textContent = `⏱ ${fmtTime(Math.max(0, state.examTimeLeft))}`;
+    if (state.examTimeLeft <= 300) el.classList.add('warning');
+    if (state.examTimeLeft <= 0) {
+      stopExamTimer();
+      toast('⏰ 시험 시간이 모두 끝났어요. 결과 화면으로 이동합니다.', 4000);
+      await stopAndWait();
+      await archiveCurrentAnswer();
+      showSessionResult();
     }
   }, 1000);
 }
 
-function stopQuestionTimer() {
-  clearInterval(state.qTimerId);
-  state.qTimerId = null;
+function stopExamTimer() {
+  clearInterval(state.examTimerId);
+  state.examTimerId = null;
+}
+
+function setAvatarSpeaking(on) {
+  const av = $('avatar');
+  if (av) av.classList.toggle('speaking', !!on);
 }
 
 function currentTranscript() {
@@ -629,7 +698,6 @@ async function nextQuestion() {
   state.qIndex++;
   // 실제 오픽처럼 7문항 후 2차 자가평가 (남은 문항 난이도 조정)
   if (state.mode === 'mock' && state.qIndex === 7 && !state.secondAssessed) {
-    stopQuestionTimer();
     $('adjust-current').textContent = state.difficulty;
     show('mock-adjust');
     return;
@@ -653,7 +721,9 @@ function applyDifficultyAdjust(delta) {
 
 // ===== 세션 결과 (모의고사 / 주제별 연습 공용) =====
 function showSessionResult() {
-  stopQuestionTimer();
+  stopExamTimer();
+  speechSynthesis.cancel();
+  setAvatarSpeaking(false);
   const isMock = state.mode === 'mock';
   $('result-title').textContent = isMock
     ? `📊 모의고사 완료! (난이도 ${DIFF_INFO[state.difficulty]?.label || '5-5'})`
@@ -1430,10 +1500,10 @@ function runSttTest() {
 
 // ===== 이벤트 바인딩 =====
 function bind() {
-  $('brand-home').onclick = () => { stopRecording(); stopQuestionTimer(); show('home'); };
+  $('brand-home').onclick = () => { stopRecording(); stopExamTimer(); speechSynthesis.cancel(); setAvatarSpeaking(false); show('home'); };
   $('btn-settings').onclick = () => {
     $('api-key-input').value = settings.apiKey;
-    $('timer-select').value = String(settings.timerSec);
+    $('exam-time-select').value = String(settings.examMin);
     $('stt-mode-select').value = settings.sttMode;
     renderSurveyGrid();
     show('settings');
@@ -1478,7 +1548,7 @@ function bind() {
     }
     if (checked.length > 0) settings.surveyIds = checked;
     settings.apiKey = $('api-key-input').value.trim();
-    settings.timerSec = parseInt($('timer-select').value, 10);
+    settings.examMin = parseInt($('exam-time-select').value, 10);
     settings.sttMode = $('stt-mode-select').value;
     toast('저장되었습니다 ✅');
     // Whisper 모드 선택 시 모델을 미리 다운로드 (첫 녹음 때 기다리지 않도록)
@@ -1488,7 +1558,7 @@ function bind() {
     }
     show('home');
   };
-  $('btn-listen').onclick = () => speakQuestion(state.queue[state.qIndex].text);
+  $('btn-listen').onclick = replayQuestion;
   $('btn-toggle-text').onclick = () => {
     state.questionVisible = !state.questionVisible;
     $('q-text').classList.toggle('blurred', !state.questionVisible);
@@ -1499,7 +1569,7 @@ function bind() {
   $('btn-next-q').onclick = nextQuestion;
   $('btn-finish').onclick = async () => {
     await stopAndWait();
-    stopQuestionTimer();
+    stopExamTimer();
     await archiveCurrentAnswer();
     if (state.mockResults.some((r) => r.transcript || r.recId != null)) showSessionResult();
     else show('home');
