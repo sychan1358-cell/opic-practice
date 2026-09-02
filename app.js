@@ -19,6 +19,8 @@ const state = {
   sttActive: false,
   lastSttError: null,
   whisperPromise: null,
+  retakeUsed: false,     // 문항당 다시 녹음 1회
+  recToken: 0,           // 다시 녹음 시 이전 AI 받아쓰기 결과 무시용
   finalTranscript: '',
   qTimerId: null,
   qTimeLeft: 0,
@@ -356,6 +358,7 @@ async function startRecording() {
   state.sttActive = !useWhisper;
   state.lastSttError = null;
   state.whisperPromise = null;
+  $('btn-retake').classList.add('hidden');
 
   if (useWhisper) {
     // Whisper 모드: 실시간 인식 없이 녹음만, 끝나면 AI가 받아쓰기
@@ -418,8 +421,10 @@ function stopRecording() {
   // 녹음 완료 후 AI 받아쓰기: Whisper 모드는 항상 실행,
   // 기본 모드는 실시간 받아쓰기가 비어 있으면 자동으로 Whisper로 전환 (기기 인식 실패 대비)
   if (wasRecording && settings.sttMode !== 'stt-only' && state.recDuration >= 2) {
+    const token = state.recToken;
     state.whisperPromise = (async () => {
       await (state.stopPromise || Promise.resolve());
+      if (token !== state.recToken) return; // 다시 녹음으로 리셋됨 → 이전 결과 무시
       if (!state.audioBlob) return;
       if (settings.sttMode === 'both') {
         // 실시간 인식의 마지막 결과가 늦게 도착할 수 있어 잠깐 기다린 뒤 확인
@@ -429,6 +434,7 @@ function stopRecording() {
       }
       try {
         const text = await transcribeBlob(state.audioBlob, setSttStatus);
+        if (token !== state.recToken) return; // 변환 중에 다시 녹음으로 리셋됨
         if (currentTranscript().trim()) return; // 그 사이 사용자가 직접 입력했으면 유지
         if (text) {
           state.finalTranscript = text + ' ';
@@ -445,6 +451,27 @@ function stopRecording() {
   }
   $('btn-record').classList.remove('recording');
   $('rec-label').textContent = settings.sttMode === 'stt-only' ? '받아쓰기 시작' : '녹음 시작';
+  // 녹음이 끝났고 아직 다시 녹음을 안 썼으면 버튼 표시
+  if (wasRecording && !state.retakeUsed) $('btn-retake').classList.remove('hidden');
+}
+
+// 다시 녹음 (문항당 1회): 이전 녹음·받아쓰기를 지우고 새로 녹음
+function retakeRecording() {
+  if (state.retakeUsed) return toast('다시 녹음은 문항당 1회만 가능해요');
+  if (state.recording) stopRecording();
+  state.retakeUsed = true;
+  state.recToken++;
+  state.audioBlob = null;
+  state.audioChunks = [];
+  state.finalTranscript = '';
+  state.recDuration = 0;
+  state.stopPromise = null;
+  state.whisperPromise = null;
+  $('transcript').textContent = '';
+  $('rec-time').textContent = '0:00';
+  setSttStatus('');
+  $('btn-retake').classList.add('hidden');
+  toast('이전 녹음을 지웠어요. 다시 녹음하세요 (재녹음은 1회만 가능)', 3500);
 }
 
 // 녹음이 완전히 끝나(blob 생성, AI 받아쓰기까지) 저장 가능할 때까지 대기
@@ -498,6 +525,9 @@ function renderQuestion() {
   $('rec-time').textContent = '0:00';
   $('rec-label').textContent = settings.sttMode === 'stt-only' ? '받아쓰기 시작' : '녹음 시작';
   setSttStatus('');
+  state.retakeUsed = false;
+  state.recToken++;
+  $('btn-retake').classList.add('hidden');
   $('btn-next-q').textContent = state.qIndex + 1 >= state.queue.length
     ? (state.mode === 'mock' ? '시험 종료 →' : '완료')
     : '다음 문항 →';
@@ -1441,6 +1471,7 @@ function bind() {
     $('btn-toggle-text').textContent = state.questionVisible ? '👁️ 질문 숨기기' : '👁️ 질문 보기';
   };
   $('btn-record').onclick = () => state.recording ? stopRecording() : startRecording();
+  $('btn-retake').onclick = retakeRecording;
   $('btn-next-q').onclick = nextQuestion;
   $('btn-finish').onclick = async () => {
     await stopAndWait();
